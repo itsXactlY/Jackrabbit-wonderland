@@ -1,0 +1,34 @@
+[Unit]
+Description=Hermes Zero-Knowledge LAN Gateway
+Documentation=https://github.com/itsXactlY/hermes-crypto
+After=network-online.target jackrabbit-dlm@%i.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+WorkingDirectory=/opt/hermes-crypto
+ExecStart=/usr/bin/python3 /opt/hermes-crypto/lan_gateway.py --port 8080 --tcp-port 37374
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/hermes-crypto
+PrivateTmp=yes
+
+# Resource limits
+MemoryMax=128M
+TasksMax=32
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-gateway
+
+[Install]
+WantedBy=multi-user.target
