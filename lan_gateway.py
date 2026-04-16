@@ -40,7 +40,7 @@ from datetime import datetime
 
 # Add hermes-crypto to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
-from crypto_middleware import CryptoMiddleware
+from remember_protocol import RememberProtocol
 
 
 # ================================================================
@@ -67,8 +67,8 @@ class SessionManager:
     def create_session(self) -> dict:
         """Create a new encrypted session."""
         session_id = os.urandom(8).hex()
-        cm = CryptoMiddleware()
-        header = cm.session_start()
+        rp = RememberProtocol(chaff_interval=self.chaff_interval)
+        header = rp.system_prompt_header()
         
         # Try DLM vault
         dlm_ok = False
@@ -77,14 +77,14 @@ class SessionManager:
             from dlm_vault import DLMVault
             vault = DLMVault(host=DLM_HOST, port=DLM_PORT)
             if vault.health_check():
-                vault.store_key(session_id, cm.session_key, ttl=SESSION_TTL)
+                vault.store_key(session_id, rp.master_key, ttl=SESSION_TTL)
                 dlm_ok = True
         except Exception:
             vault = None
         
         session = {
             "session_id": session_id,
-            "cm": cm,
+            "rp": rp,
             "created": datetime.now().isoformat(),
             "last_active": datetime.now().isoformat(),
             "dlm_stored": dlm_ok,
@@ -98,7 +98,7 @@ class SessionManager:
             "session_id": session_id,
             "crypto_header": header,
             "dlm_vault": dlm_ok,
-            "key_suffix": f"...{cm.session_key[-12:]}",
+            "key_suffix": f"...{rp.master_key[-12:]}",
         }
     
     def get_session(self, session_id: str = None) -> dict:
@@ -257,41 +257,38 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
         session = sessions.get_session(session_id)
         if not session:
             return {"error": "No active session. Create one first."}
-        cm = session["cm"]
-        blob, chaff = cm.encrypt_outbound(args)
-        result = {"encrypted": blob, "chaff": cm.chaff_message() if chaff else None}
+        rp = session["rp"]
+        wire_msg = rp.encode(args)
+        result = {"wire": wire_msg, "decoded_check": rp.decode(wire_msg)}
         if encrypted:
-            # Return encrypted response
-            resp_blob = cm.encrypt(json.dumps(result))
-            return {"ENC_MSG": resp_blob}
+            stored = rp.store_encrypted(json.dumps(result))
+            return {"stored": stored}
         return result
     
     elif cmd == "decrypt":
         session = sessions.get_session(session_id)
         if not session:
             return {"error": "No active session"}
-        cm = session["cm"]
-        try:
-            plaintext = cm.decrypt(args)
-            return {"decrypted": plaintext}
-        except ValueError as e:
-            return {"error": str(e)}
+        rp = session["rp"]
+        decoded = rp.decode(args)
+        if decoded:
+            return {"decoded": decoded}
+        return {"error": "Not a valid remember:: or base64 message"}
     
     elif cmd == "chaff":
-        cm = CryptoMiddleware()
-        return {"chaff": cm.chaff_message()}
+        rp = RememberProtocol()
+        return {"chaff": rp.chaff_message(), "wire": rp.chaff_encoded()}
     
     elif cmd == "key":
         session = sessions.get_session(session_id)
         if not session:
             return {"error": "No active session"}
-        cm = session["cm"]
-        rotation = cm.rotate_key()
+        rp = session["rp"]
+        new_key = rp.rotate_storage_key()
         return {
             "rotated": True,
-            "rotation_blob": rotation,
-            "new_key_suffix": f"...{cm.session_key[-12:]}",
-            "keys_in_history": len(cm._key_history),
+            "new_key_suffix": f"...{new_key[-12:]}",
+            "keys_in_history": len(rp._key_history),
         }
     
     else:

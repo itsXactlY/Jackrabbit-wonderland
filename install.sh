@@ -69,8 +69,8 @@ done
 
 echo ""
 echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}║  HERMES-CRYPTO — Zero-Knowledge AES256      ║${NC}"
-echo -e "${BOLD}${CYAN}║  JackrabbitDLM + LAN Gateway + Hermes       ║${NC}"
+echo -e "${BOLD}${CYAN}║  HERMES-CRYPTO — Zero-Knowledge AES256       ║${NC}"
+echo -e "${BOLD}${CYAN}║  JackrabbitDLM + LAN Gateway + Hermes        ║${NC}"
 echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -181,6 +181,7 @@ fi
 info "Setting up $INSTALL_DIR..."
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp -v crypto_middleware.py "$INSTALL_DIR/"
+sudo cp -v remember_protocol.py "$INSTALL_DIR/"
 sudo cp -v dlm_vault.py "$INSTALL_DIR/"
 sudo cp -v crypto_plugin.py "$INSTALL_DIR/"
 sudo cp -v lan_gateway.py "$INSTALL_DIR/"
