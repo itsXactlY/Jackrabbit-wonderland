@@ -39,7 +39,7 @@ A four-component encryption layer for Hermes Agent:
 - **Language-agnostic** — JSON-over-TCP, any device that speaks TCP can talk to it
 - **Single file** — no install, no config, no cluster. `python3 JackrabbitDLM 0.0.0.0 37373` and it runs
 
-Written by Robert APM Darin. Copyright 2021. Has been running in production for five years. That alone tells you something.
+Written by Robert APM Darin. Copyright 2021.
 
 ### The Blind Vault
 
