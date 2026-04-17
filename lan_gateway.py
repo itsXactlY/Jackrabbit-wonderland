@@ -609,7 +609,7 @@ def main():
     print()
     
     # Start HTTP server
-    with socketserver.TCPServer((args.bind, args.port), GatewayHandler) as httpd:
+    with socketserver.ThreadingTCPServer((args.bind, args.port), GatewayHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
