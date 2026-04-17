@@ -40,7 +40,7 @@ from datetime import datetime
 
 # Add hermes-crypto to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
-from remember_protocol import RememberProtocol
+from crypto_middleware import CryptoMiddleware
 
 
 # ================================================================
@@ -67,8 +67,8 @@ class SessionManager:
     def create_session(self) -> dict:
         """Create a new encrypted session."""
         session_id = os.urandom(8).hex()
-        rp = RememberProtocol(chaff_interval=self.chaff_interval)
-        header = rp.system_prompt_header()
+        cm = CryptoMiddleware()
+        header = cm.session_start()
         
         # Try DLM vault
         dlm_ok = False
@@ -77,14 +77,14 @@ class SessionManager:
             from dlm_vault import DLMVault
             vault = DLMVault(host=DLM_HOST, port=DLM_PORT)
             if vault.health_check():
-                vault.store_key(session_id, rp.master_key, ttl=SESSION_TTL)
+                vault.store_key(session_id, cm.session_key, ttl=SESSION_TTL)
                 dlm_ok = True
         except Exception:
             vault = None
         
         session = {
             "session_id": session_id,
-            "rp": rp,
+            "cm": cm,
             "created": datetime.now().isoformat(),
             "last_active": datetime.now().isoformat(),
             "dlm_stored": dlm_ok,
@@ -98,7 +98,7 @@ class SessionManager:
             "session_id": session_id,
             "crypto_header": header,
             "dlm_vault": dlm_ok,
-            "key_suffix": f"...{rp.master_key[-12:]}",
+            "key_suffix": f"...{cm.session_key[-12:]}",
         }
     
     def get_session(self, session_id: str = None) -> dict:
@@ -193,8 +193,10 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
         return {"created": result}
     
     elif cmd == "kill":
-        if session_id and sessions.destroy_session(session_id):
-            return {"destroyed": session_id}
+        # Accept session_id from JSON field OR from args
+        target = session_id or args
+        if target and sessions.destroy_session(target):
+            return {"destroyed": target}
         return {"error": "Session not found"}
     
     elif cmd == "hermes":
@@ -257,42 +259,75 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
         session = sessions.get_session(session_id)
         if not session:
             return {"error": "No active session. Create one first."}
-        rp = session["rp"]
-        wire_msg = rp.encode(args)
-        result = {"wire": wire_msg, "decoded_check": rp.decode(wire_msg)}
+        cm = session["cm"]
+        blob, chaff = cm.encrypt_outbound(args)
+        result = {
+            "encrypted": blob,
+            "session_id": session["session_id"],
+            "chaff": cm.chaff_message() if chaff else None,
+        }
         if encrypted:
-            stored = rp.store_encrypted(json.dumps(result))
-            return {"stored": stored}
+            resp_blob = cm.encrypt(json.dumps(result))
+            return {"ENC_MSG": resp_blob}
         return result
     
     elif cmd == "decrypt":
         session = sessions.get_session(session_id)
         if not session:
             return {"error": "No active session"}
-        rp = session["rp"]
-        decoded = rp.decode(args)
-        if decoded:
-            return {"decoded": decoded}
-        return {"error": "Not a valid remember:: or base64 message"}
+        cm = session["cm"]
+        try:
+            plaintext = cm.decrypt(args)
+            return {"decrypted": plaintext, "session_id": session["session_id"]}
+        except ValueError as e:
+            return {"error": str(e)}
     
     elif cmd == "chaff":
-        rp = RememberProtocol()
-        return {"chaff": rp.chaff_message(), "wire": rp.chaff_encoded()}
+        # Use session's CryptoMiddleware if available, fallback to standalone
+        session = sessions.get_session(session_id)
+        if session and session.get("cm"):
+            cm = session["cm"]
+            return {"chaff": cm.chaff_message(), "session_id": session["session_id"]}
+        cm = CryptoMiddleware()
+        cm.session_start()
+        return {"chaff": cm.chaff_message(), "session_id": None}
     
     elif cmd == "key":
         session = sessions.get_session(session_id)
         if not session:
             return {"error": "No active session"}
-        rp = session["rp"]
-        new_key = rp.rotate_storage_key()
+        cm = session["cm"]
+        rotation = cm.rotate_key()
         return {
             "rotated": True,
-            "new_key_suffix": f"...{new_key[-12:]}",
-            "keys_in_history": len(rp._key_history),
+            "rotation_blob": rotation,
+            "new_key_suffix": f"...{cm.session_key[-12:]}",
+            "keys_in_history": len(cm._key_history),
         }
     
+    elif cmd == "roundtrip":
+        # End-to-end encrypt/decrypt test
+        session = sessions.get_session(session_id)
+        if not session:
+            return {"error": "No active session. Create one first."}
+        cm = session["cm"]
+        test_msg = args or "roundtrip test"
+        blob, chaff = cm.encrypt_outbound(test_msg)
+        try:
+            decrypted = cm.decrypt(blob)
+            return {
+                "roundtrip": True,
+                "match": decrypted == test_msg,
+                "plaintext": test_msg,
+                "encrypted": blob,
+                "decrypted": decrypted,
+                "session_id": session["session_id"],
+            }
+        except Exception as e:
+            return {"roundtrip": False, "error": str(e)}
+    
     else:
-        return {"error": f"Unknown command: {cmd}", "help": "status, sessions, session, kill, hermes, pulse, shell, encrypt, decrypt, chaff, key"}
+        return {"error": f"Unknown command: {cmd}", "help": "status, sessions, session, kill, hermes, pulse, shell, encrypt, decrypt, chaff, key, roundtrip"}
 
 
 # ================================================================
@@ -358,6 +393,7 @@ button.sec{background:#333;color:#f5b731}
         <option value="decrypt">decrypt</option>
         <option value="chaff">chaff</option>
         <option value="key">key (rotate)</option>
+        <option value="roundtrip">roundtrip test</option>
         <option value="kill">kill session</option>
       </select>
       <input id="args" placeholder="arguments (optional)" />

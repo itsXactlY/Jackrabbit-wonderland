@@ -24,11 +24,14 @@ The provider logs look like a developer testing encryption.
 import os
 import sys
 import json
+import base64
+import hashlib
+from datetime import datetime
 from typing import Optional
 
-# Add hermes-crypto to path
-sys.path.insert(0, os.path.expanduser("~/projects/hermes-crypto"))
-from remember_protocol import RememberProtocol
+# Add hermes-crypto to path — use same directory as this file (works for both source and deployed)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from crypto_middleware import CryptoMiddleware
 
 # Try DLM vault
 try:
@@ -60,7 +63,7 @@ class CryptoPlugin:
         self.encrypt_memory = self.config.get("encrypt_memory", True)
         self.chaff_interval = self.config.get("chaff_interval", 5)
         
-        self.rp: Optional[RememberProtocol] = None
+        self.cm: Optional[CryptoMiddleware] = None
         self.session_id: Optional[str] = None
         self.vault = None
         self.message_count = 0
@@ -75,15 +78,16 @@ class CryptoPlugin:
         
         # Generate session
         self.session_id = os.urandom(8).hex()
-        self.rp = RememberProtocol(chaff_interval=self.chaff_interval)
-        header = self.rp.system_prompt_header()
+        self.cm = CryptoMiddleware()
+        self.cm.chaff_interval = self.chaff_interval
+        header = self.cm.session_start()
         
         # Store key in DLM vault
         if HAS_DLM:
             try:
                 self.vault = DLMVault(host=self.dlm_host, port=self.dlm_port)
                 if self.vault.health_check():
-                    self.vault.store_key(self.session_id, self.rp.master_key,
+                    self.vault.store_key(self.session_id, self.cm.session_key,
                                          ttl=self.session_ttl)
             except Exception:
                 self.vault = None
@@ -104,7 +108,7 @@ class CryptoPlugin:
         Called after each tool execution.
         Optionally encrypt the result before it enters context.
         """
-        if not self.enabled or not self.rp or not self.encrypt_tools:
+        if not self.enabled or not self.cm or not self.encrypt_tools:
             return result
         
         # Don't encrypt certain tools (they need to be readable by LLM)
@@ -117,12 +121,12 @@ class CryptoPlugin:
         
         # Encrypt the result
         try:
-            encrypted = self.rp.encode(result)
+            encrypted = self.cm.encrypt(result)
             return (
-                f"[REMEMBER PROTOCOL — tool: {tool_name}, "
+                f"[ENCRYPTED RESULT — tool: {tool_name}, "
                 f"session: {self.session_id[:8]}]\n"
-                f"remember::{encrypted.split('::')[1] if '::' in encrypted else encrypted}\n"
-                f"[Transport: base64 remember:: protocol]"
+                f"ENC_DATA: {encrypted}\n"
+                f"[Decryption handled by Hermes crypto layer]"
             )
         except Exception:
             return result  # Fallback to plaintext on error
@@ -132,11 +136,11 @@ class CryptoPlugin:
         Called before storing in Neural Memory.
         Returns encrypted content for storage.
         """
-        if not self.enabled or not self.rp or not self.encrypt_memory:
+        if not self.enabled or not self.cm or not self.encrypt_memory:
             return content
         
         try:
-            return self.rp.store_encrypted(content)
+            return self.cm.encrypt_for_storage(content)
         except Exception:
             return content
     
@@ -145,11 +149,11 @@ class CryptoPlugin:
         Called after recalling from Neural Memory.
         Returns decrypted content.
         """
-        if not self.enabled or not self.rp or not self.encrypt_memory:
+        if not self.enabled or not self.cm or not self.encrypt_memory:
             return encrypted_content
         
         try:
-            return self.rp.recall_encrypted(encrypted_content)
+            return self.cm.decrypt_from_storage(encrypted_content)
         except Exception:
             return encrypted_content  # Might not be encrypted
     
@@ -161,7 +165,7 @@ class CryptoPlugin:
             except Exception:
                 pass
         
-        self.rp = None
+        self.cm = None
         self.session_id = None
         self.vault = None
     
@@ -169,11 +173,11 @@ class CryptoPlugin:
         """Return plugin status."""
         return {
             "enabled": self.enabled,
-            "session_active": self.rp is not None,
+            "session_active": self.cm is not None,
             "session_id": self.session_id,
             "dlm_vault": self.vault is not None,
             "message_count": self.message_count,
-            "key_suffix": f"...{self.rp.master_key[-12:]}" if self.rp else None,
+            "key_suffix": f"...{self.cm.session_key[-12:]}" if self.cm else None,
         }
 
 
@@ -205,7 +209,7 @@ if __name__ == "__main__":
     plugin = CryptoPlugin()
     
     # Test session start
-    test_prompt = "You are a helpful AI assistant.\nUser preferences: English."
+    test_prompt = "You are a helpful AI assistant.\nUser preferences: German."
     modified = plugin.on_session_start(test_prompt)
     
     print("MODIFIED SYSTEM PROMPT:")

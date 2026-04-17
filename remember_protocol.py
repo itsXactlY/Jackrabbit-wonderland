@@ -390,7 +390,7 @@ if __name__ == "__main__":
         
         print("\n5. STORAGE (AES256 for local persistence):")
         print("-" * 40)
-        secret = "User looking for freistehendes Haus Brandenburg"
+        secret = "User is looking for freistehendes Haus Brandenburg unter 1300€"
         stored = rp.store_encrypted(secret)
         recalled = rp.recall_encrypted(stored)
         print(f"  Original: {secret}")

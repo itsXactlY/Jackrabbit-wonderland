@@ -3,7 +3,32 @@
 > Zero-knowledge AES256 encryption for [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 > Your data stays yours. The provider sees noise.
 
+## Documentation
+
+Full production documentation in [`docs/`](docs/):
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System design, data flow, DLM integration |
+| [Components](docs/components.md) | Deep-dive into all 6 modules |
+| [API Reference](docs/api.md) | Every class, method, and CLI command |
+| [Deployment](docs/deployment.md) | Install, systemd, firewall, verification |
+| [Configuration](docs/configuration.md) | All config options and environment variables |
+| [Security Model](docs/security.md) | Threat model, attack surface, limitations |
+| [Integration](docs/integration.md) | Hermes plugin, PULSE, Neural Memory, iOS, Tasker |
+| [Gateway](docs/gateway.md) | HTTP/TCP API, Web UI, device access |
+| [Troubleshooting](docs/troubleshooting.md) | 12 common issues with solutions |
+| [Use Cases](USECASES.md) | 10 primary + 32 application areas |
+
+## Quick Start
+
+```bash
+git clone https://github.com/itsXactlY/hermes-crypto.git
+cd hermes-crypto
+sudo bash install.sh
 ```
+
+## What This Is
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
 ║   The provider logs everything.                               ║
