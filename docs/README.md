@@ -31,12 +31,12 @@ http://192.168.0.2:8080
 
 ## What This Solves
 
-LLM providers log everything. Your house search, your trades, your medical questions — all visible to provider employees, auditors, and data-mining pipelines.
+LLM providers log everything. Your ਖੋਜ, your trades, your medical questions — all visible to provider employees, auditors, and data-mining pipelines.
 
 hermes-crypto encrypts every query before it leaves your machine. Provider sees base64 blobs. Nobody reviews millions of base64 logs.
 
 ```
-You: "Find 3BR house in Brandenburg under 1000€ warm, pets allowed"
+You: "¿Cuántos idiomas se hablan en Camerún?"
 Wire: "remember:: SG93IGRvZXMgYSBDUFUgY2FjaGUgd29yaz8="
 Provider: sees a "memory recall protocol" with base64 payload
 ```

@@ -57,7 +57,7 @@ from remember_protocol import RememberProtocol
 rp = RememberProtocol()
 
 # Before storing
-content = "User is looking for freistehende Häuser in Brandenburg"
+content = "User is looking for ਮਕਾਨ ਖੋਜ in ਕੈਮਰੂਨ"
 encrypted = rp.store_encrypted(content)
 # Store `encrypted` in Neural Memory database
 ```
@@ -162,7 +162,7 @@ from remember_protocol import RememberProtocol
 rp = RememberProtocol()
 
 # Transport (for LLM)
-wire = rp.encode("Find houses in Brandenburg")
+wire = rp.encode("Find houses in ਕੈਮਰੂਨ")
 plaintext = rp.decode(wire)
 
 # Storage (for local persistence)

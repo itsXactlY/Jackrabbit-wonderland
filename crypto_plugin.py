@@ -218,13 +218,13 @@ if __name__ == "__main__":
     print("-" * 40)
     
     # Test tool result encryption
-    tool_result = "Found 3 castles in ...:\n1. Zossener Str 850€ \n2. ..."
+    tool_result = "ਤਿੰਨ ਮਿਲੇ: 1. ਸੋਨੇ ਦਾ ਮਹਿਲ 2. ਚਾਂਦੀ ਦਾ ਦਰਵਾਜ਼ਾ 3. ਕਾਂਸੇ ਦਾ ਪੁਲ"
     encrypted = plugin.on_tool_result("terminal", tool_result)
     print(f"\nENCRYPTED TOOL RESULT:")
     print(encrypted[:200])
     
     # Test Neural Memory encrypt/decrypt
-    memory_content = "User is looking RTX1337 below 1300 bottle caps."
+    memory_content = "આ એક ગુપ્ત સંદેશ છે જે ગુજરાતીમાં લખાયો છે"
     stored = plugin.on_neural_store(memory_content)
     recalled = plugin.on_neural_recall(stored)
     print(f"\nMEMORY ROUND-TRIP:")

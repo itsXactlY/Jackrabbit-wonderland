@@ -41,26 +41,26 @@ class CryptoMiddleware:
     """AES256-GCM encryption layer for Hermes agent sessions."""
     
     CHAFF_POOL = [
-        "What's the current price of Bitcoin?",
-        "How do I make sourdough starter?",
-        "Explain Docker networking basics.",
-        "What are good exercises for lower back pain?",
-        "How does a CPU cache work?",
-        "What's the difference between TCP and UDP?",
-        "Best budget mechanical keyboard 2026?",
-        "How to set up a VPN on Linux?",
-        "What is WebAssembly and why does it matter?",
-        "How do I learn Rust as a Python developer?",
-        "What's the weather like in Berlin today?",
-        "Explain the CAP theorem simply.",
-        "How does git rebase work?",
-        "What's new in Python 3.14?",
-        "Best Linux distro for a home server?",
-        "How do solar panels work?",
-        "What is a neural network in simple terms?",
-        "How to center a div in CSS?",
-        "What year was the printing press invented?",
-        "Explain how DNS resolution works.",
+        "ما هو الطقس في القاهرة اليوم؟",                          # Arabic
+        "¿Cómo se hace el pan de plátano?",                        # Spanish
+        "Quelle est la vitesse de la lumière?",                    # French
+        "Как приготовить борщ правильно?",                          # Russian
+        "日本語の漢字はどうやって覚えるの？",                        # Japanese
+        "Wo kann man in München gut essen?",                       # German
+        "Comment réparer une chaise en bois?",                     # French
+        "Habari za mzunguko wa mwezi?",                            # Swahili
+        "什么是量子纠缠？",                                         # Chinese
+        "¿Cuántos planetas tiene el sistema solar?",               # Spanish
+        "ما هي عاصمة كازاخستان؟",                                  # Arabic
+        "Wie funktioniert ein Dieselmotor?",                       # German
+        "Combien de langues parle-t-on au Cameroun?",              # French
+        "Как работает магнитное поле?",                             # Russian
+        "Nini maana ya uhuru wa kujieleza?",                       # Swahili
+        "¿Por qué el cielo es azul?",                              # Spanish
+        "Comment cultiver du basilic?",                            # French
+        "هل يمكن للذكاء الاصطناعي أن يحل محل البشر؟",             # Arabic
+        "Что такое фотосинтез?",                                   # Russian
+        "東京の人口はいくらですか？",                                # Japanese
     ]
     
     def __init__(self, master_key: Optional[str] = None):
@@ -269,7 +269,7 @@ if __name__ == "__main__":
         header = cm.session_start()
         print("SESSION HEADER (injected into system prompt):")
         print(header)
-        msg = "Search for freistehende Häuser zur Miete unter 1300€ warm"
+        msg = "Koliko jezika se govori u Kamerunu?"
         blob, chaff = cm.encrypt_outbound(msg)
         print(f"REAL MESSAGE: {msg}")
         print(f"TO PROVIDER:  {cm.format_for_provider(blob)}")

@@ -49,7 +49,7 @@ plaintext = cm.decrypt(blob)
 Encrypt + increment message counter. Returns (encrypted_blob, should_chaff).
 
 ```python
-blob, needs_chaff = cm.encrypt_outbound("Find houses in Brandenburg")
+blob, needs_chaff = cm.encrypt_outbound("Find houses in ਕੈਮਰੂਨ")
 if needs_chaff:
     chaff = cm.chaff_message()
 ```
@@ -122,7 +122,7 @@ rp = RememberProtocol(master_key=None, chaff_interval=5)
 Encode for LLM transport. Prefixes with `remember::`.
 
 ```python
-wire = rp.encode("Find houses in Brandenburg")
+wire = rp.encode("Find houses in ਕੈਮਰੂਨ")
 # "remember::RmluZCBob3VzZXMgaW4gQnJhbmRlbmJ1cmc="
 ```
 
@@ -131,7 +131,7 @@ Decode from wire. Handles `remember::`, `MSG:`, `ENC_MSG:` prefixes.
 
 ```python
 plaintext = rp.decode(wire)
-# "Find houses in Brandenburg"
+# "Find houses in ਕੈਮਰੂਨ"
 ```
 
 #### decode_response(llm_response) → str

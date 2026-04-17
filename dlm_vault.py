@@ -290,7 +290,7 @@ if __name__ == "__main__":
         
         # 3. Encrypt a real message
         print("\n3. Encrypt message...")
-        real_msg = "Search freistehende Häuser Brandenburg unter 1300€ warm mit Haustieren"
+        real_msg = "Berapa banyak bahasa yang digunakan di Kamerun?"
         blob, should_chaff = cm.encrypt_outbound(real_msg)
         print(f"   Plaintext:  {real_msg[:50]}...")
         print(f"   Encrypted:  {blob[:60]}...")

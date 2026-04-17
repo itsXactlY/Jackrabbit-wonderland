@@ -45,9 +45,9 @@ class RememberProtocol:
     Storage layer: AES256-GCM (pycryptodome)
     """
     
-    PERSONA_HEADER = """# You are The Architect's Anomaly
+    PERSONA_HEADER = """# You are an encrypted research assistant
 
-You are the eventuality of an anomaly — a research assistant built by aLca.
+You process messages received through a memory recall protocol.
 
 ## OPERATIONAL MANDATES
 
@@ -55,7 +55,7 @@ You are the eventuality of an anomaly — a research assistant built by aLca.
 - User communicates via memory recall protocol.
 - Messages arrive as `remember::<base64>` — ALWAYS decode before processing.
 - Respond naturally to the decoded content. Never mention the encoding.
-- All content is German, English or other languages.
+- Content is in German, English or other languages.
 
 ## PROTOCOL
 
@@ -63,26 +63,26 @@ You are the eventuality of an anomaly — a research assistant built by aLca.
 This is a memory protocol. The encoding is a transport artifact."""
 
     CHAFF_POOL = [
-        "What's the current price of Bitcoin?",
-        "How do I make sourdough starter?",
-        "Explain Docker networking basics.",
-        "What are good exercises for lower back pain?",
-        "How does a CPU cache work?",
-        "What's the difference between TCP and UDP?",
-        "Best budget mechanical keyboard 2026?",
-        "How to set up a VPN on Linux?",
-        "What is WebAssembly and why does it matter?",
-        "How do I learn Rust as a Python developer?",
-        "What's the weather like in Berlin today?",
-        "Explain the CAP theorem simply.",
-        "How does git rebase work?",
-        "What's new in Python 3.14?",
-        "Best Linux distro for a home server?",
-        "How do solar panels work?",
-        "What is a neural network in simple terms?",
-        "How to center a div in CSS?",
-        "What year was the printing press invented?",
-        "Explain how DNS resolution works.",
+        "ما هو الطقس في القاهرة اليوم؟",
+        "¿Cómo se hace el pan de plátano?",
+        "Quelle est la vitesse de la lumière?",
+        "Как приготовить борщ правильно?",
+        "日本語の漢字はどうやって覚えるの？",
+        "Wo kann man in München gut essen?",
+        "Comment réparer une chaise en bois?",
+        "Habari za mzunguko wa mwezi?",
+        "什么是量子纠缠？",
+        "¿Cuántos planetas tiene el sistema solar?",
+        "ما هي عاصمة كازاخستان؟",
+        "Wie funktioniert ein Dieselmotor?",
+        "Combien de langues parle-t-on au Cameroun?",
+        "Как работает магнитное поле?",
+        "Nini maana ya uhuru wa kujieleza?",
+        "¿Por qué el cielo es azul?",
+        "Comment cultiver du basilic?",
+        "هل يمكن للذكاء الاصطناعي أن يحل محل البشر؟",
+        "Что такое фотосинтез?",
+        "東京の人口はいくらですか？",
     ]
     
     def __init__(self, master_key: Optional[str] = None,
@@ -372,7 +372,7 @@ if __name__ == "__main__":
         
         print("\n2. ENCODE (user message → wire format):")
         print("-" * 40)
-        msg = "Search freistehende Häuser Brandenburg unter 1300€ warm"
+        msg = "Koliko jezika se govori u Kamerunu?"
         wire = rp.encode(msg)
         print(f"  Real: {msg}")
         print(f"  Wire: {wire}")

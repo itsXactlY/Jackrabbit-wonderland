@@ -107,7 +107,7 @@
 ### Encryption Flow
 
 ```
-Plaintext: "Find houses in Brandenburg under 1000€"
+Plaintext: "ਕਿੰਨੀਆਂ ਭਾਸ਼ਾਵਾਂ ਕੈਮਰੂਨ ਵਿੱਚ ਬੋਲੀਆਂ ਜਾਂਦੀਆਂ ਹਨ"
     │
     ▼
 AES256-GCM Encrypt
