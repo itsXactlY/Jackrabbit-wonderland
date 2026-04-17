@@ -53,6 +53,7 @@ python3 tests/run_all.py plugin     # 23 tests — plugin lifecycle, tool encryp
 - Gateway: all API commands, response format, kill via args, roundtrip built-in, 100KB payloads
 
 ## What This Is
+```
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
 ║   The provider logs everything.                               ║
