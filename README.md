@@ -28,6 +28,30 @@ cd hermes-crypto
 sudo bash install.sh
 ```
 
+## Testing
+
+114 tests across 4 suites — crypto, gateway, DLM vault, plugin.
+
+```bash
+# Run everything
+python3 tests/run_all.py
+
+# Run specific suite
+python3 tests/run_all.py crypto     # 51 tests — AES256-GCM, nonce, tamper, rotation, memory
+python3 tests/run_all.py gateway    # 22 tests — HTTP API, concurrent sessions, session bomb
+python3 tests/run_all.py dlm        # 18 tests — key lifecycle, TTL, locking, identity isolation
+python3 tests/run_all.py plugin     # 23 tests — plugin lifecycle, tool encryption, neural memory
+```
+
+**What's tested:**
+- Round-trip: ASCII, Unicode (äöüß, emoji, arabic, CJK), empty, NUL bytes, 1MB payloads
+- Security: nonce uniqueness (1000 iterations), tamper detection (bit-flip), truncated blobs, garbage input
+- Key management: rotation chain, history eviction, auto-rotation, master key vs session key isolation
+- Concurrency: 20 parallel sessions, 50 threads on same session, 500 session bomb, 1000 DLM key bomb
+- Memory: tracemalloc plateau verification, 10k encrypt baseline, 50-cycle warmup comparison
+- DLM: TTL expiry, lock/unlock, identity isolation, overwrite, 5KB payload limit detection
+- Gateway: all API commands, response format, kill via args, roundtrip built-in, 100KB payloads
+
 ## What This Is
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
