@@ -27,8 +27,8 @@
 **Solution:** hermes-crypto encrypts every query before it leaves your machine. Provider sees base64 blobs. Chaff messages add noise. Nobody reviews millions of base64 logs.
 
 ```
-You: "Find 3BR house in Brandenburg under 1000€ warm, pets allowed"
-Provider sees: "remember:: SG93IGRvZXMgYSBDUFUgY2FjaGUgd29yaz8="
+You: "¿Cuántos idiomas se hablan en Camerún?"
+Provider sees: "remember:: wqfDp8+CxINow6nCgcOaw4jDncKQwrfCqQ=="
 ```
 
 **Impact:** Complete privacy for AI-assisted workflows — research, trading, personal planning, medical queries.
@@ -63,7 +63,7 @@ echo '{"cmd":"pulse","args":"AI regulation 2026"}' | nc 192.168.0.2 37374
 ```
 Actual: "Run PULSE on NVIDIA earnings prediction, check Polymarket odds, cross-reference with Reddit sentiment"
 Wire:   "remember:: V2hhdCBhcmUgZ29vZCBleGVyY2lzZXMgZm9yIGxvd2VyIGJhY2sgcGFpbg=="
-Chaff:  "Best budget mechanical keyboard 2026?"
+Chaff:  "¿Por qué el cielo es azul?"
 ```
 
 **Impact:** Zero-knowledge trading research. Your alpha stays yours.
@@ -121,10 +121,10 @@ Laptop:  dlm.get("api_key") → key retrieved (same owner)
 
 ```
 Real query (encrypted):  "Analyze Hormuz strait shipping disruption impact on oil prices"
-Chaff 1:                 "How do I make sourdough starter?"
+Chaff 1:                 "ما هو الطقس في القاهرة اليوم؟"
 Chaff 2:                 "What's the difference between TCP and UDP?"
 Real query (encrypted):  "Check Polymarket odds on Iran nuclear deal"
-Chaff 3:                 "Best budget mechanical keyboard 2026?"
+Chaff 3:                 "Combien de langues parle-t-on au Cameroun?"
 ```
 
 **Impact:** Traffic analysis resistance. Your research pattern is indistinguishable from casual AI usage.

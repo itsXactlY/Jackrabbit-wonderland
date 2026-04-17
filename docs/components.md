@@ -85,10 +85,10 @@ plaintext = cm.decrypt_from_storage(encrypted)
 
 ```
 "What's the current price of Bitcoin?"
-"How do I make sourdough starter?"
+"¿Cómo se hace el pan de plátano?"
 "Explain Docker networking basics."
 "How does a CPU cache work?"
-"Best budget mechanical keyboard 2026?"
+"Comment réparer une chaise en bois?"
 ...
 ```
 

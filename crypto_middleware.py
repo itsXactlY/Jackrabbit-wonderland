@@ -16,7 +16,7 @@ Usage:
     header = cm.session_start()
     
     # Encrypt outbound message to provider
-    encrypted = cm.encrypt_outbound("Find houses in Brandenburg")
+    encrypted = cm.encrypt_outbound("ਕਿੰਨੀਆਂ ਭਾਸ਼ਾਵਾਂ ਕੈਮਰੂਨ ਵਿੱਚ ਬੋਲੀਆਂ ਜਾਂਦੀਆਂ ਹਨ")
     
     # Decrypt inbound response from provider (if it's actually useful)
     plaintext = cm.decrypt_inbound(encrypted_response)

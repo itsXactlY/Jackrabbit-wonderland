@@ -21,7 +21,7 @@ Usage:
     system_prompt = rp.system_prompt_header()
     
     # Encode a message for the LLM
-    wire_msg = rp.encode("Find houses in Brandenburg")
+    wire_msg = rp.encode("¿Cuántos idiomas se hablan en Camerún?")
     
     # Decode an LLM response (if it contains base64 back)
     decoded = rp.decode_response(response_text)
@@ -390,7 +390,7 @@ if __name__ == "__main__":
         
         print("\n5. STORAGE (AES256 for local persistence):")
         print("-" * 40)
-        secret = "User is looking for freistehendes Haus Brandenburg unter 1300€"
+        secret = "Ngʻombe wengi wanakula nyasi kijani Afrika"
         stored = rp.store_encrypted(secret)
         recalled = rp.recall_encrypted(stored)
         print(f"  Original: {secret}")
