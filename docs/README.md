@@ -17,7 +17,7 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/itsXactlY/hermes-crypto.git
+git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
 cd hermes-crypto
 sudo bash install.sh
 
