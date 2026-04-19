@@ -1,4 +1,4 @@
-# Hermes-Crypto: Use Cases & Applications
+# **Jackrabbits Wonderland**: Use Cases & Applications
 
 > **AES256-GCM + JackrabbitDLM + Base64 Transport + LAN Gateway**
 > Zero-knowledge encryption layer for AI agent interactions.
