@@ -105,8 +105,11 @@ class CryptoPlugin:
     
     def on_tool_result(self, tool_name: str, result: str) -> str:
         """
-        Called after each tool execution.
-        Optionally encrypt the result before it enters context.
+        Encrypt tool result BEFORE it enters context (provider-side storage).
+
+        NO server-side decryption — the LLM receives encrypted blobs.
+        Client-side remember_protocol handles decode.
+        Search decryption is ALWAYS client-side only.
         """
         if not self.enabled or not self.cm or not self.encrypt_tools:
             return result

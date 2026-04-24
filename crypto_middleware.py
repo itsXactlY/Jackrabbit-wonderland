@@ -125,6 +125,19 @@ class CryptoMiddleware:
         return base64.b64encode(blob).decode()
     
     def decrypt(self, ciphertext_b64: str, key: Optional[str] = None) -> str:
+        """
+        Client-side decryption only.
+
+        Server (DLM vault, gateway) NEVER decrypts user messages.
+        This method exists only for:
+        - Testing/verification of round-trips
+        - Client-side decryption after receiving encrypted response
+
+        The server-side decrypt command in lan_gateway.py is for
+        encrypted blobs created by THIS session's CryptoMiddleware,
+        NOT for decrypting arbitrary user search content.
+        No server-side search decryption exists by design.
+        """
         key = key or self.session_key
         if not key:
             raise ValueError("No key available.")
