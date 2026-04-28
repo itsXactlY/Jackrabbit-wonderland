@@ -96,6 +96,12 @@ UPSTREAM_API_KEY = (
     or ""
 ).strip()
 
+# Manual override / fallback when the upstream /models endpoint omits or
+# under-reports context_length.  MiniMax-M2 (~204800), Kimi-K2 (~131072),
+# GLM-4.6 (~200000), etc.  Set in gateway.env.
+UPSTREAM_CONTEXT_LENGTH = _env_int("WONDERLAND_UPSTREAM_CONTEXT_LENGTH", 0)
+UPSTREAM_MAX_OUTPUT_TOKENS = _env_int("WONDERLAND_UPSTREAM_MAX_OUTPUT_TOKENS", 0)
+
 # Model names that mean "use this gateway/proxy", not a real upstream model.
 # Without this, `hermes chat -m wonderland` sends model="wonderland" to the
 # configured provider and fails with "unknown/unsupported model".  The proxy
@@ -329,6 +335,154 @@ def resolve_wonderland_upstream(env: dict = None) -> dict:
         "api_key": api_key,
         "api_key_present": bool(api_key),
     }
+
+
+_UPSTREAM_MODELS_CACHE = {"key": None, "expires": 0.0, "data": []}
+_UPSTREAM_MODELS_TTL = 300.0
+
+
+def _fetch_upstream_models(upstream: dict) -> list:
+    """Pull the upstream provider's /models list, cached for _UPSTREAM_MODELS_TTL.
+
+    Returns a list of OpenAI-shaped model dicts (id, context_length, ...).
+    Empty list on any failure — callers must tolerate that.
+    """
+    import time
+    base = (upstream.get("base_url") or "").rstrip("/")
+    api_key = upstream.get("api_key") or ""
+    if not base or not api_key:
+        return []
+    cache_key = (base, api_key[:12])
+    now = time.time()
+    if _UPSTREAM_MODELS_CACHE["key"] == cache_key and now < _UPSTREAM_MODELS_CACHE["expires"]:
+        return _UPSTREAM_MODELS_CACHE["data"]
+    try:
+        req = Request(base + "/models", headers={
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "wonderland-gateway/1.0",
+        })
+        with urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (HTTPError, URLError, json.JSONDecodeError, OSError):
+        return []
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        return []
+    _UPSTREAM_MODELS_CACHE.update(key=cache_key, expires=now + _UPSTREAM_MODELS_TTL, data=data)
+    return data
+
+
+def _model_context_fields(entry: dict) -> dict:
+    """Pull context_length / max output token fields out of an upstream model entry.
+
+    Different providers spell these differently — OpenRouter uses
+    `context_length`, some use `max_context_length` or nest under
+    `top_provider`.  Keep it permissive.
+    """
+    out = {}
+    if not isinstance(entry, dict):
+        return out
+    top = entry.get("top_provider") if isinstance(entry.get("top_provider"), dict) else {}
+    ctx = (
+        entry.get("context_length")
+        or entry.get("max_context_length")
+        or entry.get("context_window")
+        or top.get("context_length")
+    )
+    if isinstance(ctx, int) and ctx > 0:
+        out["context_length"] = ctx
+    max_out = (
+        entry.get("max_completion_tokens")
+        or entry.get("max_output_tokens")
+        or top.get("max_completion_tokens")
+    )
+    if isinstance(max_out, int) and max_out > 0:
+        out["max_completion_tokens"] = max_out
+    return out
+
+
+_MODELS_DEV_CACHE = {"expires": 0.0, "data": None}
+_MODELS_DEV_TTL = 3600.0
+_MODELS_DEV_URL = "https://models.dev/api.json"
+
+
+def _fetch_models_dev() -> dict:
+    """Pull the models.dev catalogue, cached for an hour.
+
+    models.dev is the same registry hermes-agent consults — using it here means
+    direct providers (MiniMax, Z.AI, Kimi, etc.) that omit `context_length`
+    on `/v1/models` still get a real value advertised downstream.
+    """
+    import time
+    now = time.time()
+    if _MODELS_DEV_CACHE["data"] is not None and now < _MODELS_DEV_CACHE["expires"]:
+        return _MODELS_DEV_CACHE["data"]
+    try:
+        req = Request(_MODELS_DEV_URL, headers={"User-Agent": "wonderland-gateway/1.0"})
+        with urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (HTTPError, URLError, json.JSONDecodeError, OSError):
+        return _MODELS_DEV_CACHE["data"] or {}
+    if not isinstance(payload, dict):
+        return {}
+    _MODELS_DEV_CACHE.update(expires=now + _MODELS_DEV_TTL, data=payload)
+    return payload
+
+
+def _models_dev_lookup(provider: str, model: str) -> dict:
+    """Find context/output limits for provider+model in the models.dev catalogue."""
+    if not provider or not model:
+        return {}
+    catalogue = _fetch_models_dev()
+    # models.dev keys vary in casing — try a few common spellings before giving up.
+    p = provider.lower()
+    candidates = [provider, p, p.replace("-", ""), p.replace("_", "-")]
+    if p == "minimax-cn":
+        candidates.append("minimax")  # same model catalogue
+    pdata = None
+    for key in candidates:
+        if key in catalogue and isinstance(catalogue[key], dict):
+            pdata = catalogue[key]
+            break
+    if not pdata:
+        return {}
+    models = pdata.get("models", {})
+    entry = models.get(model) if isinstance(models, dict) else None
+    if not isinstance(entry, dict):
+        return {}
+    out = {}
+    limit = entry.get("limit") if isinstance(entry.get("limit"), dict) else entry
+    ctx = limit.get("context")
+    if isinstance(ctx, int) and ctx > 0:
+        out["context_length"] = ctx
+    max_out = limit.get("output")
+    if isinstance(max_out, int) and max_out > 0:
+        out["max_completion_tokens"] = max_out
+    return out
+
+
+def resolve_upstream_model_meta(upstream: dict) -> dict:
+    """Find context_length etc. for the configured upstream model.
+
+    Order: env var override > upstream /v1/models entry > models.dev catalogue.
+    First two are exact; models.dev is a community registry and may lag, but
+    direct providers (MiniMax, Kimi, Z.AI, ...) often omit context_length on
+    their /models endpoint, and falling back here beats Hermes' default 128K.
+    """
+    meta = {}
+    upstream_id = (upstream.get("model") or "").strip()
+    if upstream_id:
+        for entry in _fetch_upstream_models(upstream):
+            if str(entry.get("id") or "").strip() == upstream_id:
+                meta.update(_model_context_fields(entry))
+                break
+    if "context_length" not in meta and upstream_id:
+        meta.update({k: v for k, v in _models_dev_lookup(upstream.get("provider", ""), upstream_id).items() if k not in meta})
+    if UPSTREAM_CONTEXT_LENGTH > 0:
+        meta["context_length"] = UPSTREAM_CONTEXT_LENGTH
+    if UPSTREAM_MAX_OUTPUT_TOKENS > 0:
+        meta["max_completion_tokens"] = UPSTREAM_MAX_OUTPUT_TOKENS
+    return meta
 
 
 def _session_for_openai_request(headers, data: dict) -> dict:
@@ -1018,6 +1172,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             runtime = resolve_wonderland_upstream(os.environ.copy())
             model_id = runtime.get("model") or ""
             provider = runtime.get("provider") or "upstream"
+            meta = resolve_upstream_model_meta(runtime)
             models = [
                 ("wonderland", "hermes"),
                 ("hermes-agent", "hermes"),
@@ -1029,7 +1184,9 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                 if not model or model in seen:
                     continue
                 seen.add(model)
-                data.append({"id": model, "object": "model", "owned_by": owner})
+                entry = {"id": model, "object": "model", "owned_by": owner}
+                entry.update(meta)
+                data.append(entry)
             self._json_response({"object": "list", "data": data})
 
         elif path == "/sessions":
