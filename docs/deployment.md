@@ -7,11 +7,89 @@
 | Python | 3.8+ | Runtime |
 | pycryptodome | Latest | AES256-GCM (only pip dependency) |
 | JackrabbitDLM | Latest | Volatile key vault |
+| Podman | 4+ | Container deployment |
 | systemd | Any | Service management |
 | nftables | Any | Firewall (LAN-only) |
 | sudo | Any | Service + firewall install |
 
 ## Installation
+
+### Podman
+
+This repo can run as a two-container Podman pod: one JackrabbitDLM container and
+one gateway container. The pod publishes the OpenAI-compatible Wonderland proxy
+on `http://127.0.0.1:18080/v1`.
+
+Traffic from the Wonderland proxy to real LLM endpoints uses the Remember
+Protocol only: `remember::<base64>` user/tool payloads and the Remember Protocol
+system header. The gateway does not send AES headers, AES ciphertext, or AES key
+material upstream.
+
+Podman maps host ports `18080`, `17373`, and `17374` to the container's internal
+gateway/DLM ports `8080`, `37373`, and `37374` to avoid colliding with native
+systemd deployments.
+
+```bash
+cd /home/alca/projects/hermes-crypto
+
+# Build the local image.
+container/run-podman.sh build
+
+# Start JackrabbitDLM + gateway in one pod.
+container/run-podman.sh start
+
+# Verify.
+container/run-podman.sh status
+curl -s http://127.0.0.1:18080/v1/models | python3 -m json.tool
+```
+
+Client projects should not duplicate the endpoint/model settings. Source the
+repo-owned file instead:
+
+```bash
+set -a
+. /home/alca/projects/hermes-crypto/container/wonderland.env
+set +a
+```
+
+That file is the source of truth for projects using `wonderland`:
+
+| Variable | Value |
+|----------|-------|
+| `OPENAI_BASE_URL` | `http://127.0.0.1:18080/v1` |
+| `OPENAI_MODEL` | `wonderland` |
+| `WONDERLAND_BASE_URL` | `http://127.0.0.1:18080/v1` |
+| `WONDERLAND_MODEL` | `wonderland` |
+
+To make the host Hermes CLI use that same gateway by default, sync its local
+provider config from the source-of-truth file:
+
+```bash
+container/run-podman.sh configure-hermes
+```
+
+This creates or updates the named Hermes custom provider `wonderland`, sets the
+default model to `wonderland`, and keeps a timestamped backup of
+`~/.hermes/config.yaml`.
+
+If the gateway needs provider keys or a specific upstream provider model, copy
+`container/gateway.env.example` to `container/gateway.env`. That local file is
+ignored by git.
+
+```bash
+cp container/gateway.env.example container/gateway.env
+$EDITOR container/gateway.env
+container/run-podman.sh restart
+```
+
+You can also use Compose-compatible Podman:
+
+```bash
+podman compose -f container/podman-compose.yml up -d --build
+```
+
+The image includes only JackrabbitDLM and the Wonderland gateway/encryption
+proxy. It does not install `hermes-agent` inside the pod.
 
 ### Automatic
 

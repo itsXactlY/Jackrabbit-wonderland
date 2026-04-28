@@ -22,6 +22,36 @@ Full production documentation in [`docs/`](docs/):
 
 ## Quick Start
 
+### Podman
+
+```bash
+git clone https://github.com/itsXactlY/hermes-crypto.git
+cd hermes-crypto
+
+# Build once, then run the DLM + gateway pod.
+container/run-podman.sh build
+container/run-podman.sh start
+
+# Point any OpenAI-compatible project at the Wonderland proxy.
+set -a
+. "$PWD/container/wonderland.env"
+set +a
+
+# Make the host Hermes CLI use the same Wonderland gateway by default.
+container/run-podman.sh configure-hermes
+```
+
+The Podman gateway exposes `http://127.0.0.1:18080/v1` and the local model alias
+`wonderland`. Keep `container/wonderland.env` as the single source of truth for
+projects that should use this gateway. Hermes Agent is configured from that same
+file through `container/run-podman.sh configure-hermes`.
+
+When Wonderland calls a real LLM endpoint, it uses the Remember Protocol only:
+`remember::<base64>` payloads plus the Remember Protocol system header. AES
+headers, AES ciphertext, and AES key material are never sent upstream.
+
+### Native systemd
+
 ```bash
 git clone https://github.com/itsXactlY/hermes-crypto.git
 cd hermes-crypto
@@ -30,7 +60,7 @@ sudo bash install.sh
 
 ## Testing
 
-114 tests across 4 suites — crypto, gateway, DLM vault, plugin.
+117 tests across 4 suites — crypto, gateway, DLM vault, plugin.
 
 ```bash
 # Run everything
@@ -38,7 +68,7 @@ python3 tests/run_all.py
 
 # Run specific suite
 python3 tests/run_all.py crypto     # 51 tests — AES256-GCM, nonce, tamper, rotation, memory
-python3 tests/run_all.py gateway    # 22 tests — HTTP API, concurrent sessions, session bomb
+python3 tests/run_all.py gateway    # 25 tests — HTTP API, Remember Protocol upstream, concurrency
 python3 tests/run_all.py dlm        # 18 tests — key lifecycle, TTL, locking, identity isolation
 python3 tests/run_all.py plugin     # 23 tests — plugin lifecycle, tool encryption, neural memory
 ```
@@ -150,7 +180,7 @@ JackrabbitDLM (Robert's foundation)
     │
     ├── Volatile key-value store     →  we store AES256 session keys here
     ├── Ownership enforcement        →  only our identity reads our keys
-    ├── TTL auto-expiry              →  keys self-destruct after 2 hours
+    ├── TTL auto-expiry              →  keys self-destruct when their DLM TTL expires
     ├── Custom Encoder/Decoder API   →  we inject AES256-GCM here
     ├── JSON-over-TCP protocol       →  we build HTTP/TCP gateways on top
     └── select.poll() event loop     →  handles concurrent LAN connections
@@ -199,26 +229,57 @@ hermes-crypto adds:
 
 ## How It Works
 
-1. **Session start**: Generate random AES256 key, store in DLM (volatile memory, 2h TTL)
-2. **System prompt**: Inject `## KEY: <base64> ##` header — looks like dev config
-3. **Messages**: Hermes encrypts before sending to provider, decrypts responses
-4. **Chaff**: Every 3-5 messages, a plausible decoy query is sent ("What's the price of Bitcoin?")
-5. **Key rotation**: Every 20 messages, new key generated, old key kept for decrypting history
-6. **Session end**: Key destroyed (explicitly or TTL expiry)
+1. **Client config**: Projects point to `http://127.0.0.1:18080/v1` with model `wonderland`.
+2. **Provider transport**: Wonderland prepends the Remember Protocol system header.
+3. **Messages**: User/tool payloads are sent upstream as `remember::<base64>`.
+4. **Guardrail**: AES headers, AES ciphertext, and key material are stripped before upstream dispatch.
+5. **Local state**: DLM/session state stays inside the Wonderland pod.
+6. **Session end**: Local state is destroyed explicitly or by TTL expiry.
 
 **What the provider sees:**
-- A system prompt with a key string (looks like "crypto testing project")
-- Base64 encrypted blobs in user messages
-- The LLM's confused attempts at decoding them
+- A Remember Protocol system prompt
+- `remember::<base64>` payloads in user/tool messages
 - Periodic normal queries (chaff)
 - **Nobody reviews this.** Automated scanners look for CSAM/violence/copyright, not base64.
 
 **What the provider does NOT see:**
+- AES headers, AES ciphertext, AES keys, or DLM key material
 - Your actual queries (house search, trading analysis, PULSE research)
 - Neural Memory contents (encrypted at rest with master key)
 - Tool results (optionally encrypted before entering context)
 
 ## Install
+
+### Podman
+
+```bash
+container/run-podman.sh build
+container/run-podman.sh start
+container/run-podman.sh status
+```
+
+For projects that should use Wonderland:
+
+```bash
+set -a
+. /home/alca/projects/hermes-crypto/container/wonderland.env
+set +a
+```
+
+This exports `OPENAI_BASE_URL=http://127.0.0.1:18080/v1` and
+`OPENAI_MODEL=wonderland` for any OpenAI-compatible client.
+
+For the host Hermes CLI, sync the named custom provider and default model from
+the same file:
+
+```bash
+container/run-podman.sh configure-hermes
+```
+
+The Podman image is Wonderland-only: JackrabbitDLM plus the gateway/encryption
+proxy. It does not install or run a second `hermes-agent` inside the pod.
+
+### Native systemd
 
 ```bash
 git clone https://github.com/itsXactlY/hermes-crypto.git
@@ -282,7 +343,16 @@ Body: {"cmd":"hermes","args":"ask what is 2+2"}
 
 ## Hermes Integration
 
-### Option A: Plugin (recommended)
+### Option A: Wonderland Provider (recommended)
+
+```bash
+container/run-podman.sh configure-hermes
+```
+
+Hermes uses the OpenAI-compatible Wonderland gateway. Real LLM endpoints receive
+Remember Protocol payloads only.
+
+### Option B: Legacy Direct Plugin
 
 ```bash
 cp /opt/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/
@@ -290,11 +360,13 @@ cp /opt/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/
 
 The plugin automatically:
 - Generates a session key on new sessions
-- Injects the crypto header into the system prompt
+- Injects the crypto header into the system prompt for direct-plugin mode
 - Encrypts tool results before they enter context
 - Encrypts Neural Memory entries at rest
 
-### Option B: Manual
+Do not use the legacy direct plugin as the upstream transport for Wonderland.
+
+### Option C: Manual Local Crypto
 
 ```python
 import sys

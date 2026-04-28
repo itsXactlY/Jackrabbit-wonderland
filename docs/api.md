@@ -1,5 +1,17 @@
 # API Reference
 
+## Gateway OpenAI-Compatible Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1` | Service metadata and supported endpoint list |
+| `GET` | `/v1/models` | Available local aliases, including `wonderland` |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions proxy |
+
+`/v1/chat/completions` sends only Remember Protocol payloads to real LLM
+endpoints: `remember::<base64>` plus the Remember Protocol system header. AES
+headers, AES ciphertext, and key material are stripped before upstream dispatch.
+
 ## crypto_middleware.CryptoMiddleware
 
 ### Constructor
@@ -83,7 +95,7 @@ RememberProtocol(master_key: Optional[str] = None, chaff_interval: int = 5)
 | `store_encrypted` | `(data, key=None) → str` | `AES:<blob>` or `B64:<blob>` | Encrypt for local storage |
 | `recall_encrypted` | `(stored, key=None) → str` | Plaintext | Decrypt from local storage |
 | `rotate_storage_key` | `() → str` | New key | Rotate master key |
-| `store_key_in_dlm` | `(dlm_client, session_id, ttl=7200) → bool` | Success | Store master key in DLM |
+| `store_key_in_dlm` | `(dlm_client, session_id, ttl=3000) → bool` | Success | Store master key in DLM |
 | `status` | `() → dict` | Status dict | Protocol state |
 
 ### Backward Compatibility
@@ -145,7 +157,7 @@ CryptoPlugin(config: dict = None)
 | `enabled` | `bool` | `True` | Enable/disable plugin |
 | `dlm_host` | `str` | `"127.0.0.1"` | DLM server host |
 | `dlm_port` | `int` | `37373` | DLM server port |
-| `session_ttl` | `int` | `7200` | Key TTL in seconds |
+| `session_ttl` | `int` | `3000` | Key TTL in seconds |
 | `encrypt_tools` | `bool` | `True` | Encrypt tool results |
 | `encrypt_memory` | `bool` | `True` | Encrypt Neural Memory |
 | `chaff_interval` | `int` | `5` | Chaff every N messages |
@@ -204,7 +216,8 @@ Returns Web UI (HTML).
     "gateway": "running",
     "dlm": "online",
     "dlm_version": "JackrabbitDLM v...",
-    "crypto": "AES256-GCM",
+    "provider_transport": "remember::base64",
+    "local_crypto": "AES256-GCM",
     "sessions": 1,
     "time": "2026-04-17T14:30:00"
 }

@@ -443,34 +443,40 @@ def test_session_key_zeroization():
 # ================================================================
 
 def test_format_for_provider():
-    """format_for_provider should contain the blob and decode instructions."""
+    """format_for_provider must use Remember Protocol, never AES on the wire."""
     cm = CryptoMiddleware()
     cm.session_start()
-    blob = cm.encrypt("test")
-    formatted = cm.format_for_provider(blob)
+    formatted = cm.format_for_provider("test")
 
-    if "ENC_MSG:" not in formatted:
-        R.fail("format_for_provider", "missing ENC_MSG prefix")
-    elif blob not in formatted:
-        R.fail("format_for_provider", "blob not in output")
-    elif "Decode" not in formatted:
-        R.fail("format_for_provider", "missing decode instructions")
+    if not formatted.startswith("remember::"):
+        R.fail("format_for_provider", "missing remember:: prefix")
+    elif "ENC_MSG:" in formatted or "AES" in formatted:
+        R.fail("format_for_provider", "AES marker leaked upstream")
+    elif cm.session_key in formatted:
+        R.fail("format_for_provider", "AES session key embedded")
     else:
         R.ok("format_for_provider")
 
 
 def test_provider_sees_only_base64():
-    """The formatted message should NOT contain plaintext."""
+    """The wire format must hide plaintext behind base64 (remember::)."""
     cm = CryptoMiddleware()
     cm.session_start()
     secret = "MY_SECRET_PASSWORD_12345"
-    blob = cm.encrypt(secret)
-    formatted = cm.format_for_provider(blob)
+    formatted = cm.format_for_provider(secret)
 
     if secret in formatted:
         R.fail("provider_no_plaintext", "secret visible in formatted output")
+    elif not formatted.startswith("remember::"):
+        R.fail("provider_no_plaintext", "not Remember-encoded")
     else:
-        R.ok("provider_no_plaintext")
+        # Roundtrip-decode to confirm the LLM can recover the plaintext
+        from remember_protocol import RememberProtocol
+        decoded = RememberProtocol().decode(formatted)
+        if decoded != secret:
+            R.fail("provider_no_plaintext", f"roundtrip failed: {decoded!r}")
+        else:
+            R.ok("provider_no_plaintext")
 
 
 # ================================================================

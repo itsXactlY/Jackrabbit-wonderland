@@ -9,7 +9,8 @@ Features:
   - Web UI (minimal, mobile-friendly)
   - JSON API (POST /command)
   - Netcat compatible (raw TCP on :37374)
-  - AES256-GCM encrypted command/response
+  - remember:: protocol (base64) for provider transport
+  - AES256-GCM for local storage only (Neural Memory, PULSE cache)
   - DLM vault key storage
   - Session management
 
@@ -32,26 +33,542 @@ import sys
 import subprocess
 import threading
 import socket
-import time
-import hashlib
-import base64
+import re
+import shlex
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, parse_qs
+from urllib.request import Request, urlopen
 from datetime import datetime
 
 # Add hermes-crypto to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 from crypto_middleware import CryptoMiddleware
+from remember_protocol import RememberProtocol
 
 
 # ================================================================
 # CONFIG
 # ================================================================
 
-GATEWAY_PORT = 8080
-RAW_TCP_PORT = 37374
-DLM_HOST = "127.0.0.1"
-DLM_PORT = 37373
-SESSION_TTL = 7200  # 2 hours
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _env_csv(name: str, default: str) -> set:
+    value = os.environ.get(name, default)
+    return {part.strip().lower() for part in value.split(",") if part.strip()}
+
+
+GATEWAY_PORT = _env_int("GATEWAY_PORT", 8080)
+RAW_TCP_PORT = _env_int("RAW_TCP_PORT", 37374)
+DLM_HOST = os.environ.get("DLM_HOST", "127.0.0.1").strip() or "127.0.0.1"
+DLM_PORT = _env_int("DLM_PORT", 37373)
+SESSION_TTL = _env_int("SESSION_TTL", 3000)  # DLM-safe default
+HERMES_BIN = os.environ.get("HERMES_BIN", "hermes").strip() or "hermes"
+PULSE_SCRIPT = os.path.expanduser(
+    os.environ.get("PULSE_SCRIPT", "~/projects/pulse/scripts/pulse.py")
+)
+UPSTREAM_PROVIDER = (
+    os.environ.get("WONDERLAND_UPSTREAM_PROVIDER")
+    or os.environ.get("HERMES_INFERENCE_PROVIDER")
+    or "openrouter"
+).strip().lower()
+UPSTREAM_BASE_URL = (
+    os.environ.get("WONDERLAND_UPSTREAM_BASE_URL")
+    or os.environ.get("UPSTREAM_BASE_URL")
+    or ""
+).strip().rstrip("/")
+UPSTREAM_MODEL = (
+    os.environ.get("WONDERLAND_UPSTREAM_MODEL")
+    or os.environ.get("HERMES_UPSTREAM_MODEL")
+    or os.environ.get("LLM_MODEL")
+    or ""
+).strip()
+UPSTREAM_API_KEY = (
+    os.environ.get("WONDERLAND_UPSTREAM_API_KEY")
+    or os.environ.get("UPSTREAM_API_KEY")
+    or ""
+).strip()
+
+# Model names that mean "use this gateway/proxy", not a real upstream model.
+# Without this, `hermes chat -m wonderland` sends model="wonderland" to the
+# configured provider and fails with "unknown/unsupported model".  The proxy
+# alias is resolved at execution time to the normal Hermes model/provider/API key.
+PROXY_MODEL_ALIASES = _env_csv("PROXY_MODEL_ALIASES", "wonderland,hermes-agent,proxy,default")
+
+# Provider flags accepted by `hermes chat --provider ...`.
+CLI_PROVIDER_CHOICES = {
+    "auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot",
+    "anthropic", "gemini", "huggingface", "zai", "kimi-coding", "minimax",
+    "minimax-cn", "kilocode", "xiaomi",
+}
+
+PROVIDER_ENV_KEYS = {
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "nous": ("NOUS_API_KEY",),
+    "openai-codex": ("OPENAI_API_KEY",),
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"),
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "huggingface": ("HF_TOKEN",),
+    "zai": ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
+    "kimi-coding": ("KIMI_API_KEY",),
+    "minimax": ("MINIMAX_API_KEY",),
+    "minimax-cn": ("MINIMAX_CN_API_KEY",),
+    "kilocode": ("KILOCODE_API_KEY",),
+    "xiaomi": ("XIAOMI_API_KEY",),
+}
+
+PROVIDER_BASE_URL_ENV_KEYS = {
+    "openrouter": "OPENROUTER_BASE_URL",
+    "openai-codex": "OPENAI_BASE_URL",
+    "anthropic": "ANTHROPIC_BASE_URL",
+    "gemini": "GEMINI_BASE_URL",
+    "zai": "GLM_BASE_URL",
+    "kimi-coding": "KIMI_BASE_URL",
+    "minimax": "MINIMAX_BASE_URL",
+    "minimax-cn": "MINIMAX_CN_BASE_URL",
+    "kilocode": "KILOCODE_BASE_URL",
+    "xiaomi": "XIAOMI_BASE_URL",
+}
+
+UPSTREAM_PROVIDER_BASE_URLS = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "huggingface": "https://router.huggingface.co/v1",
+    "zai": "https://api.z.ai/api/paas/v4",
+    "kimi-coding": "https://api.moonshot.ai/v1",
+    "minimax": "https://api.minimax.io/v1",
+    "minimax-cn": "https://api.minimaxi.com/v1",
+    "kilocode": "https://api.kilo.ai/api/gateway",
+    "xiaomi": "https://api.xiaomi.com/v1",
+}
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def hermes_command() -> list:
+    """Return the configured Hermes command as argv-safe parts."""
+    try:
+        return shlex.split(HERMES_BIN) or ["hermes"]
+    except ValueError:
+        return [HERMES_BIN]
+
+
+def _parse_env_assignments(line: str):
+    """Yield KEY=VALUE assignments from one .env line.
+
+    Supports the usual one-assignment-per-line format and the broken-but-common
+    `A=1 B=2` format. This matters here because the gateway is long-lived and
+    must pass fresh provider keys to subprocesses.
+    """
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return
+    if line.startswith("export "):
+        line = line[7:].strip()
+    try:
+        parts = shlex.split(line, comments=True, posix=True)
+    except ValueError:
+        parts = [line]
+    if not parts:
+        return
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, _, value = part.partition("=")
+        key = key.strip()
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            yield key, value.strip()
+
+
+def build_hermes_env() -> dict:
+    """Inherit process env and overlay ~/.hermes/.env without leaking secrets."""
+    env = os.environ.copy()
+    hermes_env = os.path.expanduser("~/.hermes/.env")
+    if os.path.isfile(hermes_env):
+        with open(hermes_env, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                for key, value in _parse_env_assignments(line) or ():
+                    env[key] = value
+    return env
+
+
+def _minimal_config_parse(text: str) -> dict:
+    """Tiny YAML fallback for the keys this gateway needs."""
+    cfg = {}
+    current = None
+    current_child = None
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        line = raw.strip()
+        if indent == 0 and line.endswith(":"):
+            current = line[:-1]
+            cfg.setdefault(current, {})
+            current_child = None
+            continue
+        if current == "model" and indent >= 2 and ":" in line:
+            key, _, value = line.partition(":")
+            cfg.setdefault("model", {})[key.strip()] = value.strip().strip("'\"")
+        elif current == "providers" and indent == 2 and line.endswith(":"):
+            current_child = line[:-1]
+            cfg.setdefault("providers", {}).setdefault(current_child, {})
+        elif current == "providers" and current_child and indent >= 4 and ":" in line:
+            key, _, value = line.partition(":")
+            cfg.setdefault("providers", {}).setdefault(current_child, {})[key.strip()] = value.strip().strip("'\"")
+    return cfg
+
+
+def load_hermes_config() -> dict:
+    path = os.path.expanduser("~/.hermes/config.yaml")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    try:
+        import yaml  # type: ignore
+        data = yaml.safe_load(text) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return _minimal_config_parse(text)
+
+
+def resolve_hermes_runtime(env: dict = None) -> dict:
+    """Resolve the normal Hermes model/provider/base_url/api_key for proxy use."""
+    env = env or build_hermes_env()
+    cfg = load_hermes_config()
+    model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), dict) else {}
+
+    model = (
+        str(model_cfg.get("default") or model_cfg.get("model") or model_cfg.get("default_model") or "").strip()
+        or env.get("LLM_MODEL", "").strip()
+    )
+    provider = str(model_cfg.get("provider") or env.get("HERMES_INFERENCE_PROVIDER") or "auto").strip().lower()
+    base_url = str(model_cfg.get("base_url") or "").strip().rstrip("/")
+    api_key = str(model_cfg.get("api_key") or model_cfg.get("api") or "").strip()
+
+    p_cfg = providers.get(provider) if isinstance(providers.get(provider), dict) else {}
+    if p_cfg:
+        model = model or str(p_cfg.get("default_model") or p_cfg.get("model") or "").strip()
+        base_url = base_url or str(p_cfg.get("api") or p_cfg.get("base_url") or "").strip().rstrip("/")
+        api_key = api_key or str(p_cfg.get("api_key") or "").strip()
+
+    if not api_key:
+        for key in PROVIDER_ENV_KEYS.get(provider, ()):  # keep provider-specific keys provider-specific
+            value = env.get(key, "").strip()
+            if value:
+                api_key = value
+                break
+
+    # Make subprocess resolution deterministic when we have explicit config.
+    if provider and provider != "auto":
+        env["HERMES_INFERENCE_PROVIDER"] = provider
+    if api_key:
+        for key in PROVIDER_ENV_KEYS.get(provider, ()):
+            env.setdefault(key, api_key)
+    if base_url:
+        base_key = PROVIDER_BASE_URL_ENV_KEYS.get(provider)
+        if base_key:
+            env.setdefault(base_key, base_url)
+
+    return {
+        "model": model,
+        "provider": provider,
+        "base_url": base_url,
+        "api_key_present": bool(api_key),
+    }
+
+
+def resolve_wonderland_upstream(env: dict = None) -> dict:
+    """Resolve the upstream OpenAI-compatible provider for Wonderland proxying."""
+    env = env or os.environ.copy()
+    provider = (
+        env.get("WONDERLAND_UPSTREAM_PROVIDER")
+        or env.get("HERMES_INFERENCE_PROVIDER")
+        or UPSTREAM_PROVIDER
+        or "openrouter"
+    ).strip().lower()
+    model = (
+        env.get("WONDERLAND_UPSTREAM_MODEL")
+        or env.get("HERMES_UPSTREAM_MODEL")
+        or env.get("LLM_MODEL")
+        or UPSTREAM_MODEL
+    ).strip()
+    base_url = (
+        env.get("WONDERLAND_UPSTREAM_BASE_URL")
+        or env.get("UPSTREAM_BASE_URL")
+        or UPSTREAM_BASE_URL
+        or UPSTREAM_PROVIDER_BASE_URLS.get(provider, "")
+    ).strip().rstrip("/")
+    api_key = (
+        env.get("WONDERLAND_UPSTREAM_API_KEY")
+        or env.get("UPSTREAM_API_KEY")
+        or UPSTREAM_API_KEY
+        or ""
+    ).strip()
+    if not api_key:
+        for key in PROVIDER_ENV_KEYS.get(provider, ()):
+            value = env.get(key, "").strip()
+            if value:
+                api_key = value
+                break
+    return {
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "api_key": api_key,
+        "api_key_present": bool(api_key),
+    }
+
+
+def _session_for_openai_request(headers, data: dict) -> dict:
+    session_id = headers.get("X-Hermes-Session-Id") or headers.get("X-Wonderland-Session-Id")
+    if isinstance(data.get("metadata"), dict):
+        session_id = session_id or data["metadata"].get("session_id")
+    session = sessions.get_session(session_id)
+    if session:
+        return session
+    created = sessions.create_session()
+    return sessions.get_session(created["session_id"])
+
+
+AES_UPSTREAM_BLOCKLIST = (
+    "AES",
+    "ENC_MSG:",
+    "SESSION_CRYPTO",
+    "SESSION KEY",
+    "KEY:",
+    "private key",
+    "public key",
+    "-----BEGIN",
+    "-----END",
+)
+
+
+def _remember_protocol(session: dict) -> RememberProtocol:
+    rp = session.get("remember")
+    if not isinstance(rp, RememberProtocol):
+        rp = RememberProtocol()
+        session["remember"] = rp
+        session["remember_header"] = rp.system_prompt_header()
+    return rp
+
+
+def _strip_forbidden_upstream_material(text: str) -> str:
+    """Never forward AES protocol/key material to real LLM endpoints."""
+    if not isinstance(text, str):
+        return text
+    safe_lines = []
+    for line in text.splitlines():
+        upper = line.upper()
+        if any(marker.upper() in upper for marker in AES_UPSTREAM_BLOCKLIST):
+            continue
+        safe_lines.append(line)
+    return "\n".join(safe_lines).strip()
+
+
+def _remember_text_for_provider(session: dict, text: str) -> str:
+    """Encode `text` for upstream LLM transport using Remember Protocol.
+
+    Idempotent: if `text` is already a `remember::` payload (e.g. from a
+    Hermes-side plugin that pre-encoded the message), pass it through after
+    AES-marker stripping. Re-encoding would yield `remember::<base64-of-
+    remember::...>` which the LLM can only single-decode, breaking the flow.
+    """
+    safe = _strip_forbidden_upstream_material(text)
+    if safe.lstrip().startswith("remember::"):
+        return safe
+    return _remember_protocol(session).encode(safe)
+
+
+def _remember_openai_content(session: dict, content):
+    if isinstance(content, str):
+        return _remember_text_for_provider(session, content)
+    if isinstance(content, list):
+        remembered = []
+        for item in content:
+            if not isinstance(item, dict):
+                remembered.append(item)
+                continue
+            copied = dict(item)
+            if isinstance(copied.get("text"), str):
+                copied["text"] = _remember_text_for_provider(session, copied["text"])
+            elif isinstance(copied.get("content"), str):
+                copied["content"] = _remember_text_for_provider(session, copied["content"])
+            remembered.append(copied)
+        return remembered
+    return content
+
+
+def remember_openai_messages(session: dict, messages: list) -> list:
+    """Encode upstream LLM payloads with Remember Protocol only."""
+    rp = _remember_protocol(session)
+    remembered = [
+        {
+            "role": "system",
+            "content": session.get("remember_header") or rp.system_prompt_header(),
+        }
+    ]
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        copied = dict(msg)
+        role = str(copied.get("role") or "").lower()
+        if role in {"user", "tool"}:
+            copied["content"] = _remember_openai_content(session, copied.get("content", ""))
+        elif isinstance(copied.get("content"), str):
+            copied["content"] = _strip_forbidden_upstream_material(copied["content"])
+        remembered.append(copied)
+    return remembered
+
+
+def decode_openai_response(session: dict, response: dict) -> dict:
+    """Best-effort Remember Protocol response decoding for non-streaming completions."""
+    try:
+        choices = response.get("choices") or []
+        for choice in choices:
+            message = choice.get("message") if isinstance(choice, dict) else None
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            message["content"] = _remember_protocol(session).decode_response(content)
+    except Exception:
+        pass
+    return response
+
+
+def _has_flag(argv: list, *flags: str) -> bool:
+    return any(part in flags or any(part.startswith(f + "=") for f in flags if f.startswith("--")) for part in argv)
+
+
+def prepare_hermes_argv(args: str, env: dict = None) -> tuple[list, dict]:
+    """Parse user args and rewrite proxy model aliases to the real runtime model."""
+    env = env or build_hermes_env()
+    argv = shlex.split(args)
+    if not argv:
+        return argv, resolve_hermes_runtime(env)
+
+    runtime = resolve_hermes_runtime(env)
+    if argv[0] != "chat":
+        return argv, runtime
+
+    def _replace_model_at(index: int, value_index: int):
+        requested = argv[value_index].strip().lower()
+        if requested in PROXY_MODEL_ALIASES:
+            model = runtime.get("model") or ""
+            if model:
+                argv[value_index] = model
+            else:
+                # No runtime model found: drop the explicit proxy alias so Hermes
+                # can fall back to its own config instead of sending "wonderland".
+                del argv[index:value_index + 1]
+            provider = runtime.get("provider") or ""
+            if provider in CLI_PROVIDER_CHOICES and not _has_flag(argv, "--provider"):
+                argv.extend(["--provider", provider])
+            return True
+        return False
+
+    i = 1
+    while i < len(argv):
+        part = argv[i]
+        if part in ("-m", "--model") and i + 1 < len(argv):
+            _replace_model_at(i, i + 1)
+            break
+        if part.startswith("--model="):
+            requested = part.split("=", 1)[1].strip().lower()
+            if requested in PROXY_MODEL_ALIASES:
+                model = runtime.get("model") or ""
+                if model:
+                    argv[i] = f"--model={model}"
+                else:
+                    del argv[i]
+                provider = runtime.get("provider") or ""
+                if provider in CLI_PROVIDER_CHOICES and not _has_flag(argv, "--provider"):
+                    argv.extend(["--provider", provider])
+            break
+        i += 1
+    return argv, runtime
+
+
+def openai_messages_to_prompt(messages: list) -> str:
+    """Flatten OpenAI chat messages into a single Hermes CLI query."""
+    if not isinstance(messages, list) or not messages:
+        return ""
+    normalized = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "user")
+        content = msg.get("content")
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text") or item.get("content") or ""
+                    if text:
+                        parts.append(str(text))
+            content = "\n".join(parts)
+        elif content is None:
+            content = ""
+        else:
+            content = str(content)
+        if content.strip():
+            normalized.append((role, content.strip()))
+    if not normalized:
+        return ""
+    if len(normalized) == 1 and normalized[0][0] == "user":
+        return normalized[0][1]
+    lines = ["Continue this chat. Answer the latest user message.", ""]
+    for role, content in normalized:
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def extract_hermes_final_response(stdout: str) -> str:
+    """Best-effort cleanup of Hermes CLI output for API/proxy responses."""
+    text = ANSI_RE.sub("", stdout or "").replace("\r\n", "\n")
+    for marker in ("\nResume this session with:", "\nSession:", "\nsession_id:"):
+        if marker in text:
+            text = text.rsplit(marker, 1)[0]
+    # Prefer content printed inside the Hermes response box.
+    if "╭─ ⚕ Hermes" in text:
+        text = text.rsplit("╭─ ⚕ Hermes", 1)[1]
+        text = "\n".join(text.split("\n")[1:])
+    # Drop common diagnostics/noise while keeping the final answer.
+    drop_prefixes = (
+        "[neural]", "[embed]", "Embedding backend:", "PASS:", "FAIL:",
+        "┌─", "└─", "╰─", "╭─", "─", "⚠️", "❌",
+    )
+    cleaned = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            cleaned.append("")
+            continue
+        if stripped.startswith(drop_prefixes):
+            continue
+        cleaned.append(line)
+    text = "\n".join(cleaned).strip()
+    # If reasoning leaked before a short final answer, use the last paragraph.
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(paragraphs) > 1:
+        text = paragraphs[-1]
+    return text.strip() or stdout.strip()
+
 
 # ================================================================
 # SESSION STATE
@@ -68,7 +585,8 @@ class SessionManager:
         """Create a new encrypted session."""
         session_id = os.urandom(8).hex()
         cm = CryptoMiddleware()
-        header = cm.session_start()
+        cm.session_start()
+        rp = RememberProtocol()
         
         # Try DLM vault
         dlm_ok = False
@@ -76,8 +594,7 @@ class SessionManager:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from dlm_vault import DLMVault
             vault = DLMVault(host=DLM_HOST, port=DLM_PORT)
-            if vault.health_check():
-                vault.store_key(session_id, cm.session_key, ttl=SESSION_TTL)
+            if vault.health_check() and vault.store_key(session_id, cm.session_key, ttl=SESSION_TTL):
                 dlm_ok = True
         except Exception:
             vault = None
@@ -85,6 +602,8 @@ class SessionManager:
         session = {
             "session_id": session_id,
             "cm": cm,
+            "remember": rp,
+            "remember_header": rp.system_prompt_header(),
             "created": datetime.now().isoformat(),
             "last_active": datetime.now().isoformat(),
             "dlm_stored": dlm_ok,
@@ -96,9 +615,9 @@ class SessionManager:
         
         return {
             "session_id": session_id,
-            "crypto_header": header,
+            "remember_header": session["remember_header"],
+            "provider_transport": "remember::base64",
             "dlm_vault": dlm_ok,
-            "key_suffix": f"...{cm.session_key[-12:]}",
         }
     
     def get_session(self, session_id: str = None) -> dict:
@@ -167,7 +686,7 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
         try:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from dlm_vault import DLMVault
-            vault = DLMVault()
+            vault = DLMVault(host=DLM_HOST, port=DLM_PORT)
             if vault.health_check():
                 dlm_ok = True
                 lock = vault._make_locker("version-check")
@@ -180,7 +699,8 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
             "gateway": "running",
             "dlm": "online" if dlm_ok else "offline",
             "dlm_version": dlm_version,
-            "crypto": "AES256-GCM",
+            "provider_transport": "remember::base64",
+            "local_crypto": "AES256-GCM",
             "sessions": len(sessions.sessions),
             "time": datetime.now().isoformat(),
         }
@@ -202,16 +722,32 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
     elif cmd == "hermes":
         if not args:
             return {"error": "No hermes command provided"}
+
+        env = build_hermes_env()
+        try:
+            hermes_args, runtime = prepare_hermes_argv(args, env)
+        except ValueError as e:
+            return {"error": f"Invalid hermes args: {e}"}
+
         try:
             result = subprocess.run(
-                ["hermes"] + args.split(),
-                capture_output=True, text=True, timeout=120
+                hermes_command() + hermes_args,
+                capture_output=True, text=True, timeout=120, env=env
             )
-            return {
-                "stdout": result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout,
-                "stderr": result.stderr[-500:] if len(result.stderr) > 500 else result.stderr,
+            response = {
+                "stdout": result.stdout[-4000:] if len(result.stdout) > 4000 else result.stdout,
+                "stderr": result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr,
                 "exit_code": result.returncode,
             }
+            # Useful for debugging the proxy alias without exposing credentials.
+            if hermes_args != shlex.split(args):
+                response["proxy"] = {
+                    "alias_rewritten": True,
+                    "model": runtime.get("model"),
+                    "provider": runtime.get("provider"),
+                    "api_key_present": runtime.get("api_key_present"),
+                }
+            return response
         except subprocess.TimeoutExpired:
             return {"error": "Hermes command timed out (120s)"}
         except FileNotFoundError:
@@ -220,7 +756,7 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
     elif cmd == "pulse":
         if not args:
             return {"error": "No search topic provided"}
-        pulse_script = os.path.expanduser("~/projects/pulse/scripts/pulse.py")
+        pulse_script = PULSE_SCRIPT
         if not os.path.exists(pulse_script):
             return {"error": f"PULSE not found at {pulse_script}"}
         try:
@@ -283,14 +819,11 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
             return {"error": str(e)}
     
     elif cmd == "chaff":
-        # Use session's CryptoMiddleware if available, fallback to standalone
         session = sessions.get_session(session_id)
-        if session and session.get("cm"):
-            cm = session["cm"]
-            return {"chaff": cm.chaff_message(), "session_id": session["session_id"]}
-        cm = CryptoMiddleware()
-        cm.session_start()
-        return {"chaff": cm.chaff_message(), "session_id": None}
+        if session and session.get("remember"):
+            rp = session["remember"]
+            return {"chaff": rp.chaff_message(), "session_id": session["session_id"]}
+        return {"chaff": RememberProtocol().chaff_message(), "session_id": None}
     
     elif cmd == "key":
         session = sessions.get_session(session_id)
@@ -301,7 +834,6 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
         return {
             "rotated": True,
             "rotation_blob": rotation,
-            "new_key_suffix": f"...{cm.session_key[-12:]}",
             "keys_in_history": len(cm._key_history),
         }
     
@@ -398,7 +930,7 @@ button.sec{background:#333;color:#f5b731}
       </select>
       <input id="args" placeholder="arguments (optional)" />
       <button onclick="submit()">EXECUTE</button>
-      <div class="crypto-indicator" id="crypto-st">AES256-GCM ready</div>
+      <div class="crypto-indicator" id="crypto-st">remember:: ready</div>
       <div class="output" id="out">Ready.</div>
     </div>
   </div>
@@ -467,6 +999,39 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             result = execute_command("status")
             self._json_response(result)
         
+        elif path == "/health":
+            result = execute_command("status")
+            self._json_response({"status": result.get("status", "ok"), "gateway": "running"})
+
+        elif path in {"/v1", "/v1/"}:
+            self._json_response({
+                "object": "service",
+                "id": "wonderland-gateway",
+                "status": "ok",
+                "endpoints": [
+                    "/v1/models",
+                    "/v1/chat/completions",
+                ],
+            })
+
+        elif path == "/v1/models":
+            runtime = resolve_wonderland_upstream(os.environ.copy())
+            model_id = runtime.get("model") or ""
+            provider = runtime.get("provider") or "upstream"
+            models = [
+                ("wonderland", "hermes"),
+                ("hermes-agent", "hermes"),
+                (model_id, provider),
+            ]
+            seen = set()
+            data = []
+            for model, owner in models:
+                if not model or model in seen:
+                    continue
+                seen.add(model)
+                data.append({"id": model, "object": "model", "owned_by": owner})
+            self._json_response({"object": "list", "data": data})
+
         elif path == "/sessions":
             result = execute_command("sessions")
             self._json_response(result)
@@ -476,8 +1041,17 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"Not found")
     
+    def do_OPTIONS(self):
+        """CORS preflight for browser/OpenAI-compatible clients."""
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Hermes-Session-Id")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+
     def do_POST(self):
-        """Handle command POSTs."""
+        """Handle command POSTs and OpenAI-compatible chat completions."""
+        path = urlparse(self.path).path
         content_len = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_len).decode("utf-8")
         
@@ -485,6 +1059,14 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             data = json.loads(body)
         except json.JSONDecodeError:
             self._json_response({"error": "Invalid JSON"}, 400)
+            return
+
+        if path == "/v1/chat/completions":
+            self._handle_chat_completions(data)
+            return
+
+        if path != "/command":
+            self._json_response({"error": "Not found"}, 404)
             return
         
         cmd = data.get("cmd", "")
@@ -498,6 +1080,115 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         
         result = execute_command(cmd, args, encrypted, session_id)
         self._json_response(result)
+
+    def _openai_error(self, message: str, code: int = 400, err_type: str = "invalid_request_error"):
+        self._json_response({"type": "error", "error": {"type": err_type, "message": message}}, code)
+
+    def _handle_chat_completions(self, data: dict):
+        """OpenAI-compatible /v1/chat/completions proxy through Wonderland.
+
+        `model: wonderland` is a local alias.  It is rewritten to the configured
+        upstream provider model, while user/tool payloads are encoded with the
+        Remember Protocol before they leave the Wonderland pod.  AES headers,
+        AES ciphertext, and AES key material are never sent upstream.
+        """
+        messages = data.get("messages") or []
+        if not isinstance(messages, list) or not messages:
+            self._openai_error("No messages provided", 400)
+            return
+
+        upstream = resolve_wonderland_upstream(os.environ.copy())
+        missing = [
+            name for name in ("base_url", "model", "api_key")
+            if not upstream.get(name)
+        ]
+        if missing:
+            self._openai_error(
+                "Wonderland upstream is not configured. Set "
+                "WONDERLAND_UPSTREAM_PROVIDER, WONDERLAND_UPSTREAM_MODEL, and "
+                "WONDERLAND_UPSTREAM_API_KEY in container/gateway.env.",
+                503,
+                "server_error",
+            )
+            return
+
+        session = _session_for_openai_request(self.headers, data)
+        requested_model = str(data.get("model") or "wonderland").strip()
+        requested_lower = requested_model.lower()
+        upstream_model = upstream.get("model") or requested_model
+        if requested_lower and requested_lower not in PROXY_MODEL_ALIASES:
+            upstream_model = requested_model
+
+        payload = dict(data)
+        payload["model"] = upstream_model
+        payload["messages"] = remember_openai_messages(session, messages)
+        url = upstream["base_url"].rstrip("/") + "/chat/completions"
+        body = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {upstream['api_key']}",
+            "X-Title": "Wonderland Gateway",
+        }
+        if upstream.get("provider") == "openrouter":
+            headers["HTTP-Referer"] = "http://127.0.0.1:18080"
+
+        request = Request(url, data=body, headers=headers, method="POST")
+        try:
+            upstream_response = urlopen(request, timeout=1800)
+        except HTTPError as e:
+            message = e.read().decode("utf-8", errors="replace")[-2000:] or str(e)
+            self._openai_error(message, e.code, "server_error")
+            return
+        except URLError as e:
+            self._openai_error(f"Wonderland upstream connection failed: {e}", 502, "server_error")
+            return
+
+        if data.get("stream"):
+            self._proxy_sse_response(upstream_response)
+            return
+
+        raw = upstream_response.read().decode("utf-8", errors="replace")
+        try:
+            response_data = json.loads(raw)
+        except json.JSONDecodeError:
+            self._openai_error(raw[-2000:] or "Invalid upstream JSON", 502, "server_error")
+            return
+        response_data = decode_openai_response(session, response_data)
+        response_data["model"] = requested_model or "wonderland"
+        self._json_response(response_data)
+
+    def _proxy_sse_response(self, upstream_response):
+        """Stream an upstream SSE response without running an agent in the pod."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        while True:
+            chunk = upstream_response.read(8192)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
+
+    def _sse_chat_response(self, completion_id: str, model: str, created: int, content: str):
+        """Emit a minimal OpenAI-compatible SSE stream after Hermes completes."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        chunks = [
+            {"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": model,
+             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]},
+            {"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": model,
+             "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]},
+            {"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": model,
+             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ]
+        for chunk in chunks:
+            self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
     
     def _json_response(self, data: dict, code: int = 200):
         """Send JSON response."""
@@ -516,6 +1207,7 @@ def raw_tcp_server(port: int):
     """Simple raw TCP server for netcat compatibility."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.bind(("0.0.0.0", port))
     sock.listen(5)
     print(f"[TCP] Raw TCP on :{port} (netcat compatible)")
@@ -573,6 +1265,12 @@ def _handle_tcp(conn: socket.socket, addr: tuple):
 # MAIN
 # ================================================================
 
+class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
+    """Threading server that can restart immediately after a deploy."""
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Hermes Zero-Knowledge LAN Gateway")
@@ -587,7 +1285,7 @@ def main():
     print("=" * 50)
     print(f"  HTTP:  http://{args.bind}:{args.port}")
     print(f"  TCP:   {args.bind}:{args.tcp_port} (netcat)")
-    print(f"  Crypto: {'DISABLED' if args.no_crypto else 'AES256-GCM'}")
+    print(f"  Transport: {'DISABLED' if args.no_crypto else 'remember:: (base64) → provider'}")
     print(f"  DLM:   {DLM_HOST}:{DLM_PORT}")
     print("=" * 50)
     
@@ -609,7 +1307,7 @@ def main():
     print()
     
     # Start HTTP server
-    with socketserver.ThreadingTCPServer((args.bind, args.port), GatewayHandler) as httpd:
+    with ReusableThreadingTCPServer((args.bind, args.port), GatewayHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

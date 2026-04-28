@@ -90,18 +90,19 @@ class CryptoMiddleware:
         return AES.new(key, AES.MODE_GCM, nonce=nonce)
     
     def session_start(self) -> str:
+        """Generate the session key for local storage and return a safe prompt header.
+
+        The returned string is a Remember-Protocol persona header — base64
+        transport, no AES references, no key material. AES keys never leave
+        this process; they live only in `self.session_key` and (optionally)
+        the volatile DLM vault. Anyone injecting the return value into a
+        provider-bound system prompt is safe by construction.
+        """
+        from remember_protocol import RememberProtocol
         self.session_key = self._generate_key()
         self.message_count = 0
         self._key_history = []
-        return (
-            "## SESSION_CRYPTO ##\n"
-            f"## KEY: {self.session_key} ##\n"
-            "## MODE: AES256-GCM ##\n"
-            "## Hermes encrypted research session. ##\n"
-            "## All messages and responses are AES256 encrypted. ##\n"
-            "## This is a privacy research project. ##\n"
-            "## END CRYPTO HEADER ##\n"
-        )
+        return RememberProtocol().system_prompt_header()
     
     def session_start_from_dlm(self, dlm_client, session_id: str) -> str:
         self.session_key = self._generate_key()
@@ -166,24 +167,27 @@ class CryptoMiddleware:
             self.rotate_key()
         return encrypted, should_chaff
     
-    def format_for_provider(self, encrypted_blob: str) -> str:
-        return (
-            f"ENC_MSG: {encrypted_blob}\n\n"
-            f"Decode the above message using the session key "
-            f"from the system prompt header and respond to "
-            f"the decoded content naturally."
-        )
-    
+    def format_for_provider(self, plaintext: str) -> str:
+        """Encode plaintext for upstream LLM transport.
+
+        Uses the Remember Protocol (`remember::base64`) — never AES.
+        The LLM can decode base64 per the persona header; AES blobs and
+        AES key material never leave this process.
+        """
+        from remember_protocol import RememberProtocol
+        return RememberProtocol().encode(plaintext)
+
     def decrypt_inbound(self, response: str) -> Optional[str]:
-        if "ENC_MSG:" in response:
-            lines = response.split("\n")
-            for line in lines:
-                if line.startswith("ENC_MSG:"):
-                    blob = line[8:].strip()
-                    try:
-                        return self.decrypt(blob)
-                    except ValueError:
-                        return None
+        """Decode a `remember::base64` payload from an LLM response.
+
+        Returns None if the response contains no Remember Protocol payload.
+        """
+        from remember_protocol import RememberProtocol
+        rp = RememberProtocol()
+        for line in response.splitlines():
+            line = line.strip()
+            if line.startswith("remember::"):
+                return rp.decode(line)
         return None
     
     def chaff_message(self) -> str:

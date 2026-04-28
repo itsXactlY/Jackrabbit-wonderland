@@ -16,8 +16,8 @@ import sys
 import os
 import gc
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, "/opt/hermes-crypto")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crypto_plugin import CryptoPlugin
 
 
@@ -60,8 +60,8 @@ def test_session_start_stop():
     plugin = CryptoPlugin()
     prompt = plugin.on_session_start("You are Hermes.")
 
-    if "SESSION_CRYPTO" not in prompt:
-        R.fail("session_start", "no crypto header in prompt")
+    if "remember" not in prompt.lower():
+        R.fail("session_start", "no Remember Protocol header in prompt")
         return
     if "You are Hermes." not in prompt:
         R.fail("session_start", "original prompt missing")
@@ -127,10 +127,8 @@ def test_disabled_plugin():
     plugin = CryptoPlugin({"enabled": False})
     prompt = plugin.on_session_start("You are Hermes.")
 
-    if "SESSION_CRYPTO" in prompt:
-        R.fail("disabled_plugin", "crypto header injected when disabled")
-    elif prompt != "You are Hermes.":
-        R.fail("disabled_plugin", "prompt modified")
+    if prompt != "You are Hermes.":
+        R.fail("disabled_plugin", "prompt modified when disabled")
     else:
         R.ok("disabled_plugin")
 
@@ -140,15 +138,15 @@ def test_disabled_plugin():
 # ================================================================
 
 def test_tool_result_encrypted():
-    """Tool results should be encrypted (except skip list)."""
+    """Tool results travel upstream — must be Remember Protocol, not AES."""
     plugin = CryptoPlugin()
     plugin.on_session_start("test")
 
     result = plugin.on_tool_result("terminal", "output: 42")
-    if "[ENCRYPTED RESULT" not in result:
-        R.fail("tool_encrypt", "not encrypted")
-    elif "ENC_DATA:" not in result:
-        R.fail("tool_encrypt", "no ENC_DATA")
+    if not result.startswith("remember::"):
+        R.fail("tool_encrypt", f"missing remember:: prefix: {result[:60]!r}")
+    elif "ENC_DATA:" in result or "ENC_MSG:" in result:
+        R.fail("tool_encrypt", "AES marker leaked into upstream-bound result")
     elif "output: 42" in result:
         R.fail("tool_encrypt", "plaintext leaked")
     else:
@@ -166,11 +164,8 @@ def test_tool_result_skip_list():
 
     for tool in skip_tools:
         result = plugin.on_tool_result(tool, "sensitive data")
-        if "[ENCRYPTED RESULT" in result:
-            R.fail(f"skip_tool[{tool}]", "was encrypted (should skip)")
-            return
         if result != "sensitive data":
-            R.fail(f"skip_tool[{tool}]", "result modified")
+            R.fail(f"skip_tool[{tool}]", f"result modified: {result[:60]!r}")
             return
 
     R.ok(f"tool_result_skip_list ({len(skip_tools)} tools)")
@@ -280,16 +275,29 @@ def test_neural_recall_not_encrypted():
 # ================================================================
 
 def test_prompt_header_format():
-    """Crypto header should have all required fields."""
+    """Prompt header must be Remember Protocol — no AES key material."""
     plugin = CryptoPlugin()
     prompt = plugin.on_session_start("base prompt")
 
-    required = ["SESSION_CRYPTO", "KEY:", "MODE: AES256-GCM",
-                 "SESSION_ID:", "END CRYPTO HEADER"]
+    # Must look like the Remember Protocol persona
+    required = ["remember::", "memory recall"]
     for field in required:
-        if field not in prompt:
-            R.fail("prompt_header", f"missing: {field}")
+        if field.lower() not in prompt.lower():
+            R.fail("prompt_header", f"missing Remember marker: {field}")
             return
+
+    # Must NOT contain any AES leak markers
+    forbidden = ["SESSION_CRYPTO", "KEY:", "AES256-GCM", "AES256",
+                 "END CRYPTO HEADER", "ENC_MSG:", "ENC_DATA:"]
+    leaked = [marker for marker in forbidden if marker in prompt]
+    if leaked:
+        R.fail("prompt_header", f"forbidden upstream markers leaked: {leaked}")
+        return
+
+    # The actual AES key must never appear in the prompt.
+    if plugin.cm and plugin.cm.session_key and plugin.cm.session_key in prompt:
+        R.fail("prompt_header", "AES session key embedded in prompt")
+        return
 
     R.ok("prompt_header_format")
 
@@ -309,11 +317,11 @@ def test_prompt_preserves_original():
 
 
 def test_prompt_header_length():
-    """Header should be reasonable length (< 1KB)."""
+    """Header should be reasonable length (< 2KB)."""
     plugin = CryptoPlugin()
     prompt = plugin.on_session_start("short")
     header = prompt.replace("short", "").strip()
-    if len(header) > 1024:
+    if len(header) > 2048:
         R.fail("prompt_length", f"header too long: {len(header)} bytes")
     else:
         R.ok(f"prompt_header_length ({len(header)} bytes)")
@@ -383,8 +391,8 @@ def test_empty_prompt():
     """Empty system prompt should work."""
     plugin = CryptoPlugin()
     prompt = plugin.on_session_start("")
-    if "SESSION_CRYPTO" not in prompt:
-        R.fail("empty_prompt", "no crypto header")
+    if "remember" not in prompt.lower():
+        R.fail("empty_prompt", "no Remember Protocol header")
     else:
         R.ok("empty_prompt")
 
@@ -394,8 +402,8 @@ def test_huge_prompt():
     plugin = CryptoPlugin()
     big_prompt = "X" * 10240
     prompt = plugin.on_session_start(big_prompt)
-    if "SESSION_CRYPTO" not in prompt:
-        R.fail("huge_prompt", "no crypto header")
+    if "remember" not in prompt.lower():
+        R.fail("huge_prompt", "no Remember Protocol header")
     elif big_prompt not in prompt:
         R.fail("huge_prompt", "original prompt missing")
     else:
@@ -413,17 +421,87 @@ def test_unicode_prompt():
 
 
 def test_tool_result_huge():
-    """Huge tool result should be encrypted."""
+    """Huge tool result should be Remember-encoded, no AES leak."""
     plugin = CryptoPlugin()
     plugin.on_session_start("test")
     big = "X" * 100000
     result = plugin.on_tool_result("terminal", big)
-    if "[ENCRYPTED RESULT" not in result:
-        R.fail("tool_huge", "not encrypted")
+    if not result.startswith("remember::"):
+        R.fail("tool_huge", "not Remember-encoded")
     elif big in result:
         R.fail("tool_huge", "plaintext leaked")
+    elif "ENC_DATA:" in result or "ENC_MSG:" in result:
+        R.fail("tool_huge", "AES marker leaked")
     else:
         R.ok("tool_result_huge (100KB)")
+
+
+# ================================================================
+# 8. UPSTREAM SAFETY — AES KEY/CIPHERTEXT NEVER LEAVES PROCESS
+# ================================================================
+
+def test_no_aes_leak_in_prompt():
+    """The AES session key and AES markers must never appear in the prompt
+    that goes upstream to the LLM provider."""
+    plugin = CryptoPlugin()
+    prompt = plugin.on_session_start("You are Hermes.")
+
+    if not plugin.cm or not plugin.cm.session_key:
+        R.fail("no_aes_leak_prompt", "session key not set up")
+        return
+
+    if plugin.cm.session_key in prompt:
+        R.fail("no_aes_leak_prompt", "AES session key embedded in prompt")
+        return
+
+    forbidden = ["SESSION_CRYPTO", "## KEY:", "AES256-GCM", "ENC_MSG:",
+                 "ENC_DATA:", "END CRYPTO HEADER"]
+    leaked = [marker for marker in forbidden if marker in prompt]
+    if leaked:
+        R.fail("no_aes_leak_prompt", f"forbidden markers in prompt: {leaked}")
+        return
+
+    R.ok("no_aes_leak_in_prompt")
+
+
+def test_no_aes_leak_in_tool_result():
+    """Tool results must not contain AES key material or AES markers."""
+    plugin = CryptoPlugin()
+    plugin.on_session_start("test")
+
+    result = plugin.on_tool_result("terminal", "secret payload 123")
+
+    if plugin.cm and plugin.cm.session_key in result:
+        R.fail("no_aes_leak_tool", "AES session key embedded in tool result")
+        return
+
+    forbidden = ["ENC_DATA:", "ENC_MSG:", "AES256-GCM", "SESSION_CRYPTO"]
+    leaked = [marker for marker in forbidden if marker in result]
+    if leaked:
+        R.fail("no_aes_leak_tool", f"AES markers in tool result: {leaked}")
+        return
+
+    R.ok("no_aes_leak_in_tool_result")
+
+
+def test_remember_decode_roundtrip():
+    """Tool result encoding must be reversible by decoding base64 — i.e. the
+    LLM (and any client) can recover the original plaintext."""
+    plugin = CryptoPlugin()
+    plugin.on_session_start("test")
+
+    original = "search hits: Camerun, Brandenburg, Bayreuth"
+    result = plugin.on_tool_result("terminal", original)
+
+    if not result.startswith("remember::"):
+        R.fail("remember_roundtrip", "not Remember-encoded")
+        return
+
+    decoded = plugin.rp.decode(result)
+    if decoded != original:
+        R.fail("remember_roundtrip", f"roundtrip mismatch: {decoded!r}")
+    else:
+        R.ok("remember_decode_roundtrip")
 
 
 # ================================================================
@@ -459,6 +537,9 @@ def run_all():
         ("21. Huge Prompt", test_huge_prompt),
         ("22. Unicode Prompt", test_unicode_prompt),
         ("23. Tool Result Huge", test_tool_result_huge),
+        ("24. No AES Leak in Prompt", test_no_aes_leak_in_prompt),
+        ("25. No AES Leak in Tool Result", test_no_aes_leak_in_tool_result),
+        ("26. Remember Decode Roundtrip", test_remember_decode_roundtrip),
     ]
 
     for name, test_fn in tests:

@@ -144,7 +144,7 @@ plaintext = cm.decrypt(blob)
 ```python
 from dlm_vault import create_encrypted_session, end_encrypted_session
 
-session = create_encrypted_session(session_ttl=7200)
+session = create_encrypted_session(session_ttl=3000)
 cm = session["middleware"]
 
 # Use...

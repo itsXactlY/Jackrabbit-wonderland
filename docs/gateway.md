@@ -20,7 +20,8 @@ curl http://192.168.0.2:8080/status
     "gateway": "running",
     "dlm": "online",
     "dlm_version": "JackrabbitDLM v1.0",
-    "crypto": "AES256-GCM",
+    "provider_transport": "remember::base64",
+    "local_crypto": "AES256-GCM",
     "sessions": 1,
     "time": "2026-04-17T14:30:00"
 }
@@ -72,10 +73,12 @@ No args. Lists active sessions.
 
 ### session
 
-Creates new encrypted session.
+Creates a local gateway session. The public response exposes the Remember
+Protocol header only; AES key material is kept internal and is never sent to
+LLM endpoints.
 
 ```json
-{"created": {"session_id": "abc123", "crypto_header": "...", "dlm_vault": true, "key_suffix": "...xyz"}}
+{"created": {"session_id": "abc123", "remember_header": "...", "provider_transport": "remember::base64", "dlm_vault": true}}
 ```
 
 ### kill
@@ -148,7 +151,7 @@ Generate chaff (cover traffic).
 Rotate session key.
 
 ```json
-{"rotated": true, "new_key_suffix": "...abc123def4", "keys_in_history": 1}
+{"rotated": true, "rotation_blob": "...", "keys_in_history": 1}
 ```
 
 ---

@@ -7,7 +7,7 @@
 - [Architecture](architecture.md) — System design, data flow, component interaction
 - [Components](components.md) — Deep-dive into each module
 - [API Reference](api.md) — Every class, method, and CLI command
-- [Deployment](deployment.md) — Installation, systemd services, firewall
+- [Deployment](deployment.md) — Podman, systemd services, firewall
 - [Configuration](configuration.md) — All config options and environment variables
 - [Security Model](security.md) — Threat model, attack surface, limitations
 - [Integration](integration.md) — Hermes plugin, PULSE, Neural Memory, external systems
@@ -15,6 +15,22 @@
 - [Troubleshooting](troubleshooting.md) — Common issues and solutions
 
 ## Quick Start
+
+### Podman
+
+```bash
+git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
+cd hermes-crypto
+container/run-podman.sh build
+container/run-podman.sh start
+
+# Projects using Wonderland:
+set -a
+. "$PWD/container/wonderland.env"
+set +a
+```
+
+### Native systemd
 
 ```bash
 git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git

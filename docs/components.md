@@ -222,7 +222,7 @@ vault = DLMVault(
 Store AES256 key in DLM volatile memory.
 
 ```python
-ok = vault.store_key("abc123", cm.session_key, ttl=7200)
+ok = vault.store_key("abc123", cm.session_key, ttl=3000)
 # Key stored as: vault-key-abc123
 # Only identity "hermes-crypto-vault" can read it
 ```
@@ -295,7 +295,7 @@ plugin = CryptoPlugin(config={
     "enabled": True,
     "dlm_host": "127.0.0.1",
     "dlm_port": 37373,
-    "session_ttl": 7200,
+    "session_ttl": 3000,
     "encrypt_tools": True,
     "encrypt_memory": True,
     "chaff_interval": 5,

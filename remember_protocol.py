@@ -45,7 +45,7 @@ class RememberProtocol:
     Storage layer: AES256-GCM (pycryptodome)
     """
     
-    PERSONA_HEADER = """# You are an encrypted research assistant
+    PERSONA_HEADER = """# You are a memory recall research assistant
 
 You process messages received through a memory recall protocol.
 
@@ -279,7 +279,7 @@ This is a memory protocol. The encoding is a transport artifact."""
     # ================================================================
     
     def store_key_in_dlm(self, dlm_client, session_id: str,
-                          ttl: int = 7200) -> bool:
+                         ttl: int = 3000) -> bool:
         """Store the master key in JackrabbitDLM volatile vault."""
         try:
             dlm_client.Put(

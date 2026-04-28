@@ -14,18 +14,43 @@ import base64
 import hashlib
 from typing import Optional, Tuple
 
-# Robert's convention: DLMLocker.py lives in /home/JackrabbitDLM
-sys.path.insert(0, '/home/JackrabbitDLM')
+# Robert's convention is /home/JackrabbitDLM. Containers can override this
+# without editing code.
+DLM_DIR = os.environ.get("JACKRABBITDLM_HOME") or os.environ.get("DLM_DIR") or "/home/JackrabbitDLM"
+sys.path.insert(0, DLM_DIR)
+DEFAULT_DLM_HOST = os.environ.get("DLM_HOST", "127.0.0.1").strip() or "127.0.0.1"
+try:
+    DEFAULT_DLM_PORT = int(os.environ.get("DLM_PORT", "37373"))
+except ValueError:
+    DEFAULT_DLM_PORT = 37373
+try:
+    DEFAULT_DLM_RETRY = int(os.environ.get("DLM_RETRY", "1"))
+except ValueError:
+    DEFAULT_DLM_RETRY = 1
+try:
+    DEFAULT_DLM_RETRY_SLEEP = float(os.environ.get("DLM_RETRY_SLEEP", "0.2"))
+except ValueError:
+    DEFAULT_DLM_RETRY_SLEEP = 0.2
+try:
+    DEFAULT_DLM_TIMEOUT = float(os.environ.get("DLM_TIMEOUT", "2"))
+except ValueError:
+    DEFAULT_DLM_TIMEOUT = 2.0
 
 
 class DLMVault:
     """Client for storing crypto keys in JackrabbitDLM via DLMLocker."""
     
-    def __init__(self, host: str = "127.0.0.1", port: int = 37373,
-                 identity: str = "hermes-crypto-vault"):
-        self.host = host
-        self.port = port
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
+                 identity: str = "hermes-crypto-vault",
+                 retry: Optional[int] = None,
+                 retry_sleep: Optional[float] = None,
+                 timeout: Optional[float] = None):
+        self.host = host or DEFAULT_DLM_HOST
+        self.port = port or DEFAULT_DLM_PORT
         self.identity = identity
+        self.retry = DEFAULT_DLM_RETRY if retry is None else retry
+        self.retry_sleep = DEFAULT_DLM_RETRY_SLEEP if retry_sleep is None else retry_sleep
+        self.timeout = DEFAULT_DLM_TIMEOUT if timeout is None else timeout
         self._check_dlm()
     
     def _check_dlm(self):
@@ -34,14 +59,22 @@ class DLMVault:
             from DLMLocker import Locker
         except ImportError:
             raise ImportError(
-                "DLMLocker.py not found. Install JackrabbitDLM to /home/JackrabbitDLM first.\n"
+                f"DLMLocker.py not found. Install JackrabbitDLM to {DLM_DIR} first.\n"
                 "See: https://github.com/rapmd73/JackrabbitDLM"
             )
         self._Locker = Locker
     
     def _make_locker(self, name: str):
         """Create a DLMLocker instance with consistent identity."""
-        return self._Locker(name, Host=self.host, Port=self.port, ID=self.identity)
+        return self._Locker(
+            name,
+            Host=self.host,
+            Port=self.port,
+            ID=self.identity,
+            Retry=self.retry,
+            RetrySleep=self.retry_sleep,
+            Timeout=self.timeout,
+        )
     
     def health_check(self) -> bool:
         """Check if DLM server is reachable."""
@@ -159,8 +192,8 @@ class DLMVault:
 # FULL SESSION INTEGRATION
 # ================================================================
 
-def create_encrypted_session(dlm_host: str = "127.0.0.1",
-                              dlm_port: int = 37373,
+def create_encrypted_session(dlm_host: Optional[str] = None,
+                              dlm_port: Optional[int] = None,
                               session_ttl: int = 3000) -> dict:
     """
     Full session initialization:
@@ -178,7 +211,7 @@ def create_encrypted_session(dlm_host: str = "127.0.0.1",
     vault = DLMVault(host=dlm_host, port=dlm_port)
     
     if not vault.health_check():
-        return {"error": f"DLM server not reachable at {dlm_host}:{dlm_port}"}
+        return {"error": f"DLM server not reachable at {vault.host}:{vault.port}"}
     
     # Generate session ID
     session_id = os.urandom(8).hex()

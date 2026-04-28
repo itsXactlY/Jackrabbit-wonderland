@@ -5,11 +5,22 @@
 
 # Dependencies
 node_modules
+__pycache__
+*.pyc
+.venv
+venv
 
 # CI/CD
 .github
 
 # Environment files
 .env
+container/gateway.env
+
+# Local runtime state
+.hermes_history
+.skills_prompt_snapshot.json
+.update_check
+skills
 
 *.md

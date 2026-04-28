@@ -1,0 +1,44 @@
+services:
+  dlm:
+    image: ${HERMES_CRYPTO_IMAGE:-localhost/hermes-crypto:wonderland}
+    build:
+      context: ..
+      dockerfile: Containerfile
+    command: ["dlm"]
+    restart: unless-stopped
+    environment:
+      DLM_PORT: "37373"
+    ports:
+      - "${WONDERLAND_BIND:-127.0.0.1}:${WONDERLAND_DLM_PORT:-17373}:37373"
+
+  gateway:
+    image: ${HERMES_CRYPTO_IMAGE:-localhost/hermes-crypto:wonderland}
+    build:
+      context: ..
+      dockerfile: Containerfile
+    command: ["gateway"]
+    restart: unless-stopped
+    depends_on:
+      - dlm
+    environment:
+      GATEWAY_PORT: "8080"
+      RAW_TCP_PORT: "37374"
+      DLM_HOST: "dlm"
+      DLM_PORT: "37373"
+      DLM_RETRY: "${DLM_RETRY:-1}"
+      DLM_RETRY_SLEEP: "${DLM_RETRY_SLEEP:-0.2}"
+      DLM_TIMEOUT: "${DLM_TIMEOUT:-2}"
+      SESSION_TTL: "${SESSION_TTL:-3000}"
+      WONDERLAND_UPSTREAM_PROVIDER: "${WONDERLAND_UPSTREAM_PROVIDER:-openrouter}"
+      WONDERLAND_UPSTREAM_BASE_URL: "${WONDERLAND_UPSTREAM_BASE_URL:-https://openrouter.ai/api/v1}"
+      WONDERLAND_UPSTREAM_MODEL: "${WONDERLAND_UPSTREAM_MODEL:-}"
+      WONDERLAND_UPSTREAM_API_KEY: "${WONDERLAND_UPSTREAM_API_KEY:-}"
+      PROXY_MODEL_ALIASES: "${PROXY_MODEL_ALIASES:-wonderland,hermes-agent,proxy,default}"
+    ports:
+      - "${WONDERLAND_BIND:-127.0.0.1}:${WONDERLAND_GATEWAY_PORT:-18080}:8080"
+      - "${WONDERLAND_BIND:-127.0.0.1}:${WONDERLAND_RAW_TCP_PORT:-17374}:37374"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

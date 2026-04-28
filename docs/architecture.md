@@ -86,22 +86,21 @@
 
 ```
 1. SESSION START
-   └─► Generate AES256 key (os.urandom(32) → base64)
-   └─► Store key in DLM vault (volatile, 2h TTL)
-   └─► Inject crypto header into system prompt
+   └─► Initialize local gateway/DLM session state
+   └─► Prepare Remember Protocol system header
    └─► Acquire session lock (prevent concurrent runs)
 
 2. MESSAGE LOOP
-   └─► User message → AES256-GCM encrypt → base64
+   └─► User/tool message → remember::<base64>
    └─► Every 3-5 messages: inject chaff (decoy query)
-   └─► Every 20 messages: rotate key (old key kept for decrypt)
-   └─► Provider receives: base64 blob + "decode and respond" instruction
+   └─► Strip AES headers/ciphertext/key material before upstream dispatch
+   └─► Provider receives: Remember Protocol header + remember:: payload
 
 3. SESSION END
-   └─► Destroy key in DLM vault (explicit)
+   └─► Destroy local session state (explicit)
    └─► Release session lock
-   └─► OR: TTL expires → key auto-destroyed
-   └─► OR: DLM crash → key destroyed (volatile memory gone)
+   └─► OR: TTL expires → state auto-destroyed
+   └─► OR: DLM crash → state destroyed (volatile memory gone)
 ```
 
 ### Encryption Flow

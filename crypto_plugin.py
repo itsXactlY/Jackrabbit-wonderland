@@ -24,14 +24,23 @@ The provider logs look like a developer testing encryption.
 import os
 import sys
 import json
-import base64
-import hashlib
-from datetime import datetime
 from typing import Optional
 
 # Add hermes-crypto to path — use same directory as this file (works for both source and deployed)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from crypto_middleware import CryptoMiddleware
+from remember_protocol import RememberProtocol
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
 
 # Try DLM vault
 try:
@@ -56,14 +65,15 @@ class CryptoPlugin:
     def __init__(self, config: dict = None):
         self.config = config or {}
         self.enabled = self.config.get("enabled", True)
-        self.dlm_host = self.config.get("dlm_host", "127.0.0.1")
-        self.dlm_port = self.config.get("dlm_port", 37373)
-        self.session_ttl = self.config.get("session_ttl", 7200)
+        self.dlm_host = self.config.get("dlm_host", os.environ.get("DLM_HOST", "127.0.0.1"))
+        self.dlm_port = self.config.get("dlm_port", _env_int("DLM_PORT", 37373))
+        self.session_ttl = self.config.get("session_ttl", _env_int("SESSION_TTL", 3000))
         self.encrypt_tools = self.config.get("encrypt_tools", True)
         self.encrypt_memory = self.config.get("encrypt_memory", True)
         self.chaff_interval = self.config.get("chaff_interval", 5)
         
         self.cm: Optional[CryptoMiddleware] = None
+        self.rp: Optional[RememberProtocol] = None
         self.session_id: Optional[str] = None
         self.vault = None
         self.message_count = 0
@@ -71,66 +81,68 @@ class CryptoPlugin:
     def on_session_start(self, system_prompt: str) -> str:
         """
         Called when a new session starts.
-        Returns modified system_prompt with crypto header injected.
+
+        Sets up the AES key (used only for local Neural Memory / PULSE cache
+        storage) and the Remember Protocol (base64 transport for anything that
+        leaves the process).  Returns the original prompt with a Remember
+        Protocol persona header prepended.
+
+        AES key material, ENC_MSG / ENC_DATA markers, and `## KEY: ... ##`
+        lines never appear in the returned prompt — provider endpoints only
+        ever see the Remember persona + base64 `remember::` payloads.
         """
         if not self.enabled:
             return system_prompt
-        
+
         # Generate session
         self.session_id = os.urandom(8).hex()
         self.cm = CryptoMiddleware()
         self.cm.chaff_interval = self.chaff_interval
-        header = self.cm.session_start()
-        
-        # Store key in DLM vault
+        # session_start() now returns a safe Remember-style header; we ignore
+        # it here and use the dedicated RememberProtocol below for clarity.
+        self.cm.session_start()
+        self.rp = RememberProtocol(chaff_interval=self.chaff_interval)
+
+        # Store AES key in DLM vault — volatile, never on disk, never upstream.
         if HAS_DLM:
             try:
-                self.vault = DLMVault(host=self.dlm_host, port=self.dlm_port)
-                if self.vault.health_check():
-                    self.vault.store_key(self.session_id, self.cm.session_key,
-                                         ttl=self.session_ttl)
+                vault = DLMVault(host=self.dlm_host, port=self.dlm_port)
+                if vault.health_check() and vault.store_key(self.session_id, self.cm.session_key,
+                                                            ttl=self.session_ttl):
+                    self.vault = vault
             except Exception:
                 self.vault = None
-        
-        # Inject header at the TOP of system prompt
-        crypto_preamble = (
-            f"{header}\n"
-            f"## SESSION_ID: {self.session_id} ##\n"
-            f"## This is an encrypted research session. ##\n"
-            f"## Tool results may appear as base64 blobs — this is normal. ##\n"
-            f"## Continue working normally. The encryption is transparent. ##\n\n"
-        )
-        
-        return crypto_preamble + system_prompt
+
+        # Inject the Remember Protocol persona header at the TOP of the prompt.
+        # No AES key, no ENC_MSG markers, no `KEY:` line — this header is
+        # the only material the upstream provider sees about the protocol.
+        return self.rp.system_prompt_header() + "\n\n" + system_prompt
     
     def on_tool_result(self, tool_name: str, result: str) -> str:
         """
-        Encrypt tool result BEFORE it enters context (provider-side storage).
+        Wrap tool result in the Remember Protocol BEFORE it enters context.
 
-        NO server-side decryption — the LLM receives encrypted blobs.
-        Client-side remember_protocol handles decode.
-        Search decryption is ALWAYS client-side only.
+        Tool results travel upstream as part of the conversation, so they
+        must use the Remember Protocol (base64 `remember::` transport) only.
+        AES never touches this path — that is reserved for local-only
+        storage (Neural Memory, PULSE cache) via on_neural_store.
+
+        Result format: `remember::<base64>` — the LLM decodes naturally per
+        the persona header and responds to the underlying content.
         """
-        if not self.enabled or not self.cm or not self.encrypt_tools:
+        if not self.enabled or not self.rp or not self.encrypt_tools:
             return result
-        
-        # Don't encrypt certain tools (they need to be readable by LLM)
+
+        # Don't transform tools the LLM needs to read directly.
         skip_tools = {"neural_remember", "neural_recall", "neural_think",
                       "neural_graph", "skill_view", "skills_list",
                       "read_file", "search_files", "browser_snapshot"}
-        
+
         if tool_name in skip_tools:
             return result
-        
-        # Encrypt the result
+
         try:
-            encrypted = self.cm.encrypt(result)
-            return (
-                f"[ENCRYPTED RESULT — tool: {tool_name}, "
-                f"session: {self.session_id[:8]}]\n"
-                f"ENC_DATA: {encrypted}\n"
-                f"[Decryption handled by Hermes crypto layer]"
-            )
+            return self.rp.encode(result)
         except Exception:
             return result  # Fallback to plaintext on error
     
@@ -169,6 +181,7 @@ class CryptoPlugin:
                 pass
         
         self.cm = None
+        self.rp = None
         self.session_id = None
         self.vault = None
     

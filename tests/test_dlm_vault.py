@@ -19,8 +19,8 @@ import os
 import time
 import threading
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, "/opt/hermes-crypto")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dlm_vault import DLMVault
 from crypto_middleware import CryptoMiddleware
 
@@ -55,8 +55,10 @@ class TestResult:
 R = TestResult()
 
 
-def get_vault():
-    return DLMVault(host="127.0.0.1", port=37373)
+def get_vault(identity: str = "hermes-crypto-vault"):
+    host = os.environ.get("DLM_HOST", "127.0.0.1")
+    port = int(os.environ.get("DLM_PORT", "37373"))
+    return DLMVault(host=host, port=port, identity=identity)
 
 
 # ================================================================
@@ -262,7 +264,7 @@ def test_lock_unlock():
     # NOTE: JackrabbitDLM's IsLocked() always returns "locked" — it doesn't
     # distinguish "locked by someone" from "not locked". The real enforcement
     # is at Lock() level. So we test by trying to lock from a different identity.
-    vault2 = DLMVault(host="127.0.0.1", port=37373, identity="other-identity")
+    vault2 = get_vault(identity="other-identity")
     lock2 = vault2.lock_session(sid, ttl=300)
     if lock2:
         R.fail("lock_unlock", "different identity could lock (should be held)")
@@ -289,7 +291,7 @@ def test_lock_unlock():
 def test_double_lock():
     """Double-locking from different identity should fail (ownership)."""
     vault1 = get_vault()
-    vault2 = DLMVault(host="127.0.0.1", port=37373, identity="other-identity")
+    vault2 = get_vault(identity="other-identity")
     sid = "test-double-lock"
 
     vault1.lock_session(sid, ttl=300)
@@ -494,8 +496,8 @@ def test_overwrite_key():
 
 def test_identity_isolation():
     """Different identities should not see each other's keys."""
-    vault1 = DLMVault(host="127.0.0.1", port=37373, identity="identity-A")
-    vault2 = DLMVault(host="127.0.0.1", port=37373, identity="identity-B")
+    vault1 = get_vault(identity="identity-A")
+    vault2 = get_vault(identity="identity-B")
     sid = "test-isolation"
 
     vault1.store_key(sid, "secret-key-A", ttl=3000)

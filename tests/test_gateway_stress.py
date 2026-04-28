@@ -20,7 +20,7 @@ import time
 import threading
 import urllib.request
 
-GATEWAY_URL = "http://192.168.0.2:8080"
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://192.168.0.2:8080")
 
 
 class TestResult:
@@ -78,6 +78,12 @@ def api_safe(cmd, args="", session_id=None):
         return {"error": str(e)}
 
 
+def get_json(path):
+    """GET a JSON endpoint from the gateway."""
+    with urllib.request.urlopen(f"{GATEWAY_URL}{path}", timeout=10) as resp:
+        return json.loads(resp.read())
+
+
 # ================================================================
 # 1. GATEWAY HEALTH
 # ================================================================
@@ -92,6 +98,104 @@ def test_gateway_alive():
             R.fail("gateway_alive", f"unexpected: {resp}")
     except Exception as e:
         R.fail("gateway_alive", str(e))
+
+
+def test_openai_v1_root():
+    """OpenAI-compatible base URL should not 404."""
+    try:
+        resp = get_json("/v1")
+        if resp.get("status") == "ok" and "/v1/chat/completions" in resp.get("endpoints", []):
+            R.ok("openai_v1_root")
+        else:
+            R.fail("openai_v1_root", f"unexpected: {resp}")
+    except Exception as e:
+        R.fail("openai_v1_root", str(e))
+
+
+def test_openai_models():
+    """OpenAI-compatible models endpoint should expose unique local aliases."""
+    try:
+        resp = get_json("/v1/models")
+        models = [item.get("id") for item in resp.get("data", [])]
+        if resp.get("object") != "list":
+            R.fail("openai_models", f"unexpected object: {resp}")
+        elif "wonderland" not in models:
+            R.fail("openai_models", f"missing wonderland: {models}")
+        elif len(models) != len(set(models)):
+            R.fail("openai_models", f"duplicate models: {models}")
+        else:
+            R.ok("openai_models")
+    except Exception as e:
+        R.fail("openai_models", str(e))
+
+
+def test_remember_only_upstream_payload():
+    """Real LLM payloads must use remember:: and never carry AES/key material."""
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        import lan_gateway
+
+        session = {"session_id": "test"}
+        payload = lan_gateway.remember_openai_messages(session, [
+            {
+                "role": "system",
+                "content": "## SESSION_CRYPTO ##\n## KEY: should-never-leak ##\nMODE: AES256-GCM",
+            },
+            {"role": "user", "content": "plain user secret"},
+        ])
+        wire = json.dumps(payload)
+        forbidden = ["SESSION_CRYPTO", "AES", "ENC_MSG", "KEY:", "should-never-leak"]
+        leaked = [marker for marker in forbidden if marker in wire]
+        if leaked:
+            R.fail("remember_only_payload", f"forbidden upstream markers leaked: {leaked}")
+        elif "plain user secret" in wire:
+            R.fail("remember_only_payload", "plaintext user content leaked")
+        elif "remember::" not in wire:
+            R.fail("remember_only_payload", "missing remember:: payload")
+        else:
+            R.ok("remember_only_upstream_payload")
+    except Exception as e:
+        R.fail("remember_only_upstream_payload", str(e))
+
+
+def test_remember_idempotent_no_double_encode():
+    """If a hermes-side plugin already encoded the message, the gateway must
+    NOT re-encode (would yield `remember::<b64-of-remember::..>` which LLMs
+    cannot single-decode)."""
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        import lan_gateway
+        from remember_protocol import RememberProtocol
+
+        original = "hello from hermes"
+        pre_encoded = RememberProtocol().encode(original)  # remember::aGVsbG8...
+
+        session = {"session_id": "test"}
+        payload = lan_gateway.remember_openai_messages(session, [
+            {"role": "user", "content": pre_encoded},
+        ])
+        # Find the user content in the rewritten payload
+        user_msg = next((m for m in payload if m.get("role") == "user"), None)
+        if not user_msg:
+            R.fail("remember_idempotent", "no user message in payload")
+            return
+        rewritten = user_msg["content"]
+        # Must equal the pre-encoded form (passthrough), not double-encoded
+        if rewritten != pre_encoded:
+            R.fail("remember_idempotent", f"double-encoded: {rewritten[:80]!r}")
+            return
+        # Sanity: roundtrip-decode should yield the original plaintext
+        decoded = RememberProtocol().decode(rewritten)
+        if decoded != original:
+            R.fail("remember_idempotent", f"roundtrip mismatch: {decoded!r}")
+            return
+        R.ok("remember_idempotent_no_double_encode")
+    except Exception as e:
+        R.fail("remember_idempotent_no_double_encode", str(e))
 
 
 # ================================================================
@@ -537,27 +641,31 @@ def run_all():
 
     tests = [
         ("1. Gateway Alive", test_gateway_alive),
-        ("2. Session Create/Destroy", test_session_create_destroy),
-        ("3. Session Kill via Args", test_session_kill_via_args),
-        ("4. Double Destroy", test_double_destroy),
-        ("5. Destroy Nonexistent", test_destroy_nonexistent),
-        ("6. Kill Default Session", test_kill_default_session),
-        ("7. Encrypt/Decrypt Roundtrip", test_encrypt_decrypt_roundtrip),
-        ("8. Rapid Fire Encrypt", test_rapid_fire_encrypt),
-        ("9. Encrypt Returns Session ID", test_encrypt_returns_session_id),
-        ("10. Roundtrip Built-in", test_roundtrip_builtin),
-        ("11. Roundtrip Various", test_roundtrip_various),
-        ("12. Chaff with Session", test_chaff_with_session),
-        ("13. Chaff without Session", test_chaff_without_session),
-        ("14. Key Rotation API", test_key_rotation_via_api),
-        ("15. Concurrent Sessions", test_concurrent_sessions),
-        ("16. Concurrent Same Session", test_concurrent_same_session),
-        ("17. Response Always JSON", test_response_always_json),
-        ("18. Unknown Command Format", test_unknown_command_format),
-        ("19. Default Session on Startup", test_default_session_on_startup),
-        ("20. Session Bomb", test_session_bomb),
-        ("21. Large Payload", test_large_payload),
-        ("22. Unicode Payload", test_unicode_payload),
+        ("2. OpenAI v1 Root", test_openai_v1_root),
+        ("3. OpenAI Models", test_openai_models),
+        ("4. Remember-only Upstream Payload", test_remember_only_upstream_payload),
+        ("4b. Remember Idempotent (no double-encode)", test_remember_idempotent_no_double_encode),
+        ("5. Session Create/Destroy", test_session_create_destroy),
+        ("6. Session Kill via Args", test_session_kill_via_args),
+        ("7. Double Destroy", test_double_destroy),
+        ("8. Destroy Nonexistent", test_destroy_nonexistent),
+        ("9. Kill Default Session", test_kill_default_session),
+        ("10. Encrypt/Decrypt Roundtrip", test_encrypt_decrypt_roundtrip),
+        ("11. Rapid Fire Encrypt", test_rapid_fire_encrypt),
+        ("12. Encrypt Returns Session ID", test_encrypt_returns_session_id),
+        ("13. Roundtrip Built-in", test_roundtrip_builtin),
+        ("14. Roundtrip Various", test_roundtrip_various),
+        ("15. Chaff with Session", test_chaff_with_session),
+        ("16. Chaff without Session", test_chaff_without_session),
+        ("17. Key Rotation API", test_key_rotation_via_api),
+        ("18. Concurrent Sessions", test_concurrent_sessions),
+        ("19. Concurrent Same Session", test_concurrent_same_session),
+        ("20. Response Always JSON", test_response_always_json),
+        ("21. Unknown Command Format", test_unknown_command_format),
+        ("22. Default Session on Startup", test_default_session_on_startup),
+        ("23. Session Bomb", test_session_bomb),
+        ("24. Large Payload", test_large_payload),
+        ("25. Unicode Payload", test_unicode_payload),
     ]
 
     for name, test_fn in tests:
