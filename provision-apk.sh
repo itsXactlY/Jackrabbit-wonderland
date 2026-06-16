@@ -61,3 +61,37 @@ spki="$(openssl x509 -in "$CRT" -noout -pubkey \
   | openssl pkey -pubin -outform der 2>/dev/null \
   | openssl dgst -sha256 -binary | openssl enc -base64)"
 echo "OkHttp pin        : sha256/$spki"
+
+# Pairing code — a TINY base64(JSON{v,host,token,fp}). The ~2 KB cert is NOT in
+# the code: the app fetches it from the gateway at pair time and verifies
+# sha256(SPKI) == fp before pinning it. So the code stays ~120 chars (crisp QR,
+# short paste) while the scanned fingerprint remains the trust anchor.
+first_ip="${IPS[0]}"
+payload_host="${MM_GATEWAY_HOST:-$first_ip:8443}"
+payload="$(GATEWAY_HOST="$payload_host" \
+  TOKEN="$(cat "$TOKEN_FILE")" FP="$spki" python3 - <<'PY'
+import os, json, base64
+doc = {
+    "v": 1,
+    "host": os.environ["GATEWAY_HOST"],
+    "token": os.environ["TOKEN"],
+    "fp": os.environ["FP"],   # base64(sha256(SPKI)) — fetched cert verified against this
+}
+print(base64.b64encode(json.dumps(doc).encode()).decode())
+PY
+)"
+echo
+echo "=== app pairing code (paste into Settings → Secure Gateway) ==="
+echo "$payload"
+echo "(${#payload} chars — cert is fetched+verified on pairing, not embedded)"
+
+# Scannable QR for Settings → Secure Gateway → SCAN QR (Phase-3 pairing).
+if command -v qrencode >/dev/null 2>&1; then
+  echo
+  echo "=== or scan this QR (Settings → Secure Gateway → SCAN QR) ==="
+  printf '%s' "$payload" | qrencode -t ANSIUTF8
+  png="$HOME_DIR/pairing-qr.png"
+  printf '%s' "$payload" | qrencode -o "$png" -s 6 2>/dev/null && echo "QR PNG: $png"
+else
+  echo "(install qrencode to render a scannable QR of the payload above)"
+fi
