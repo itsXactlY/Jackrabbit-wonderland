@@ -33,6 +33,7 @@ import sys
 import subprocess
 import threading
 import socket
+import secrets
 import re
 import shlex
 from urllib.error import HTTPError, URLError
@@ -71,6 +72,43 @@ DLM_HOST = os.environ.get("DLM_HOST", "127.0.0.1").strip() or "127.0.0.1"
 DLM_PORT = _env_int("DLM_PORT", 37373)
 SESSION_TTL = _env_int("SESSION_TTL", 3000)  # DLM-safe default
 HERMES_BIN = os.environ.get("HERMES_BIN", "hermes").strip() or "hermes"
+
+# --- LAN hardening: bearer-token auth + TLS + client-key delivery ---------
+# The gateway exposes shell/hermes/pulse over /command. Unauthenticated that is
+# remote code execution for anything on the WLAN. When a token is provisioned
+# (GATEWAY_TOKEN env or token file), protected commands require it. With no
+# token configured, auth is OFF (legacy/dev/localhost behaviour preserved).
+_HC_HOME = os.path.expanduser(os.environ.get("HERMES_CRYPTO_HOME", "~/.hermes-crypto"))
+GATEWAY_TOKEN_FILE = os.path.expanduser(
+    os.environ.get("GATEWAY_TOKEN_FILE", os.path.join(_HC_HOME, "gateway.token"))
+)
+
+
+def _load_gateway_token() -> str:
+    tok = os.environ.get("GATEWAY_TOKEN", "").strip()
+    if tok:
+        return tok
+    try:
+        with open(GATEWAY_TOKEN_FILE) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+GATEWAY_TOKEN = _load_gateway_token()
+# Commands that perform code execution, data egress, or touch crypto state and
+# must never run unauthenticated once a token is configured. status / chaff /
+# health stay open for liveness checks and the Web UI.
+PROTECTED_COMMANDS = _env_csv(
+    "GATEWAY_PROTECTED_COMMANDS",
+    "shell,hermes,pulse,encrypt,decrypt,key,roundtrip,session,kill",
+)
+GATEWAY_TLS_CERT = os.path.expanduser(
+    os.environ.get("GATEWAY_TLS_CERT", os.path.join(_HC_HOME, "gateway.crt"))
+)
+GATEWAY_TLS_KEY = os.path.expanduser(
+    os.environ.get("GATEWAY_TLS_KEY", os.path.join(_HC_HOME, "gateway.key"))
+)
 PULSE_SCRIPT = os.path.expanduser(
     os.environ.get("PULSE_SCRIPT", "~/projects/pulse/scripts/pulse.py")
 )
@@ -1226,16 +1264,63 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._json_response({"error": "Not found"}, 404)
             return
         
+        session_id = data.get("session_id")
+        token_ok = self._token_ok()
+
+        # Inner AES layer: {session_id, enc:<base64 AES-GCM blob of {cmd,args,...}>}.
+        # The gateway is the trusted endpoint here (unlike the upstream provider),
+        # so it legitimately decrypts with the session key it shares with a paired,
+        # authenticated client. This gives app<->gateway zero-knowledge on the LAN
+        # hop, independent of (and underneath) TLS.
+        inner_encrypted = False
+        if data.get("enc"):
+            sess = sessions.get_session(session_id)
+            if not sess:
+                self._json_response({"error": "No session for encrypted request"}, 401)
+                return
+            try:
+                inner = json.loads(sess["cm"].decrypt(data["enc"]))
+            except Exception:
+                self._json_response({"error": "Decryption failed"}, 400)
+                return
+            data = {**data, **inner}
+            session_id = data.get("session_id", session_id)
+            inner_encrypted = True
+
         cmd = data.get("cmd", "")
         args = data.get("args", "")
-        session_id = data.get("session_id")
         encrypted = data.get("encrypted", False)
-        
+
         if not cmd:
             self._json_response({"error": "No 'cmd' field"}, 400)
             return
-        
+
+        # Decrypting a valid inner envelope proves possession of the session key,
+        # which is only ever handed to a token-authenticated client, so it counts
+        # as authentication too.
+        if not (token_ok or inner_encrypted) and self._command_protected(cmd):
+            self._json_response(
+                {"error": "Unauthorized: this command requires a gateway token"}, 401
+            )
+            return
+
         result = execute_command(cmd, args, encrypted, session_id)
+
+        # Client-key handshake: hand the per-session AES key to the authenticated
+        # caller so it can drive the encrypted (`enc`) path on subsequent calls.
+        # Only for genuinely authenticated callers — never in auth-disabled
+        # legacy mode (keeps the tokenless response shape unchanged).
+        authed = inner_encrypted or (bool(GATEWAY_TOKEN) and token_ok)
+        if cmd == "session" and authed and isinstance(result.get("created"), dict):
+            sess = sessions.get_session(result["created"].get("session_id"))
+            if sess:
+                result["created"]["client_key"] = sess["cm"].session_key
+
+        if inner_encrypted:
+            sess = sessions.get_session(session_id)
+            if sess:
+                self._json_response({"enc": sess["cm"].encrypt(json.dumps(result, default=str))})
+                return
         self._json_response(result)
 
     def _openai_error(self, message: str, code: int = 400, err_type: str = "invalid_request_error"):
@@ -1347,6 +1432,24 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
         self.wfile.write(b"data: [DONE]\n\n")
     
+    def _token_ok(self) -> bool:
+        """True if the request carries the configured gateway token, or if no
+        token is configured at all (auth disabled — legacy/dev/localhost)."""
+        if not GATEWAY_TOKEN:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            presented = auth[7:].strip()
+        else:
+            presented = self.headers.get("X-Gateway-Token", "").strip()
+        if not presented:
+            return False
+        return secrets.compare_digest(presented, GATEWAY_TOKEN)
+
+    @staticmethod
+    def _command_protected(cmd: str) -> bool:
+        return bool(GATEWAY_TOKEN) and cmd.strip().lower() in PROTECTED_COMMANDS
+
     def _json_response(self, data: dict, code: int = 200):
         """Send JSON response."""
         self.send_response(code)
@@ -1404,7 +1507,16 @@ def _handle_tcp(conn: socket.socket, addr: tuple):
         cmd = request.get("cmd", "shell")
         args = request.get("args", "")
         session_id = request.get("session_id")
-        
+
+        # Raw TCP carries the token as a JSON field. Protected commands are
+        # refused without it once a token is configured.
+        if GATEWAY_TOKEN and cmd.strip().lower() in PROTECTED_COMMANDS:
+            presented = str(request.get("token", ""))
+            if not (presented and secrets.compare_digest(presented, GATEWAY_TOKEN)):
+                conn.sendall(json.dumps({"error": "Unauthorized: token required"}).encode() + b"\n")
+                conn.close()
+                return
+
         result = execute_command(cmd, args, session_id=session_id)
         
         response = json.dumps(result, default=str) + "\n"
@@ -1435,14 +1547,26 @@ def main():
     parser.add_argument("--tcp-port", type=int, default=RAW_TCP_PORT, help="Raw TCP port")
     parser.add_argument("--bind", default="0.0.0.0", help="Bind address")
     parser.add_argument("--no-crypto", action="store_true", help="Disable encryption")
+    parser.add_argument("--tls-cert", default=GATEWAY_TLS_CERT, help="TLS certificate (PEM)")
+    parser.add_argument("--tls-key", default=GATEWAY_TLS_KEY, help="TLS private key (PEM)")
+    parser.add_argument("--no-tls", action="store_true", help="Force plaintext HTTP even if a cert exists")
     args = parser.parse_args()
-    
+
+    tls_enabled = (
+        not args.no_tls
+        and os.path.exists(args.tls_cert)
+        and os.path.exists(args.tls_key)
+    )
+    scheme = "https" if tls_enabled else "http"
+
     print("=" * 50)
     print("  HERMES ZERO-KNOWLEDGE LAN GATEWAY")
     print("=" * 50)
-    print(f"  HTTP:  http://{args.bind}:{args.port}")
+    print(f"  HTTP:  {scheme}://{args.bind}:{args.port}")
     print(f"  TCP:   {args.bind}:{args.tcp_port} (netcat)")
     print(f"  Transport: {'DISABLED' if args.no_crypto else 'remember:: (base64) → provider'}")
+    print(f"  TLS:   {'ENABLED (' + args.tls_cert + ')' if tls_enabled else 'DISABLED (plaintext LAN)'}")
+    print(f"  Auth:  {'TOKEN REQUIRED on ' + ','.join(sorted(PROTECTED_COMMANDS)) if GATEWAY_TOKEN else 'OPEN (no token configured)'}")
     print(f"  DLM:   {DLM_HOST}:{DLM_PORT}")
     print("=" * 50)
     
@@ -1463,8 +1587,13 @@ def main():
     print(f"  netcat:  echo '{{\"cmd\":\"status\"}}' | nc <this-ip> {args.tcp_port}")
     print()
     
-    # Start HTTP server
+    # Start HTTP(S) server
     with ReusableThreadingTCPServer((args.bind, args.port), GatewayHandler) as httpd:
+        if tls_enabled:
+            import ssl
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(args.tls_cert, args.tls_key)
+            httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
