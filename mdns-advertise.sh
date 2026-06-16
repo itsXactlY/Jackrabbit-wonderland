@@ -26,5 +26,13 @@ fp="$(openssl x509 -in "$CRT" -noout -pubkey \
   | openssl pkey -pubin -outform der 2>/dev/null \
   | openssl dgst -sha256 -binary | openssl enc -base64)"
 
-echo "mdns-advertise: publishing _mazemaker-gw._tcp on :$PORT (fp=${fp:0:12}…)" >&2
-exec avahi-publish-service "$SVC_NAME" _mazemaker-gw._tcp "$PORT" "v=1" "fp=$fp"
+# Primary LAN IPv4 (the source addr used to reach the internet) — NOT a libvirt
+# bridge / link-local. Advertised in a TXT record so the phone connects to a
+# routable v4 directly, sidestepping mDNS returning an IPv6 link-local or the
+# virbr0 address. Override with MM_GATEWAY_ADVERTISE_IP.
+lan_ip="${MM_GATEWAY_ADVERTISE_IP:-$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | awk '{print $2}')}"
+txt_a=()
+[[ -n "$lan_ip" ]] && txt_a=("a=$lan_ip")
+
+echo "mdns-advertise: publishing _mazemaker-gw._tcp on :$PORT (fp=${fp:0:12}…, a=${lan_ip:-none})" >&2
+exec avahi-publish-service "$SVC_NAME" _mazemaker-gw._tcp "$PORT" "v=1" "fp=$fp" "${txt_a[@]}"
