@@ -62,28 +62,27 @@ spki="$(openssl x509 -in "$CRT" -noout -pubkey \
   | openssl dgst -sha256 -binary | openssl enc -base64)"
 echo "OkHttp pin        : sha256/$spki"
 
-# Pairing code — a TINY base64(JSON{v,host,token,fp}). The ~2 KB cert is NOT in
-# the code: the app fetches it from the gateway at pair time and verifies
-# sha256(SPKI) == fp before pinning it. So the code stays ~120 chars (crisp QR,
-# short paste) while the scanned fingerprint remains the trust anchor.
+# Pairing code — a TINY base64(JSON{v,token,fp}). No host: the app finds the
+# gateway on the LAN via mDNS (_mazemaker-gw._tcp, advertised by
+# mazemaker-apk-gateway-mdns.service). No cert either: the app fetches it at
+# pair time and verifies sha256(SPKI) == fp before pinning. The scanned
+# fingerprint is the trust anchor. Set MM_GATEWAY_INCLUDE_HOST=1 to bake in a
+# host fallback for networks where mDNS/multicast is blocked.
 first_ip="${IPS[0]}"
 payload_host="${MM_GATEWAY_HOST:-$first_ip:8443}"
-payload="$(GATEWAY_HOST="$payload_host" \
+payload="$(GATEWAY_HOST="$payload_host" INCLUDE_HOST="${MM_GATEWAY_INCLUDE_HOST:-}" \
   TOKEN="$(cat "$TOKEN_FILE")" FP="$spki" python3 - <<'PY'
 import os, json, base64
-doc = {
-    "v": 1,
-    "host": os.environ["GATEWAY_HOST"],
-    "token": os.environ["TOKEN"],
-    "fp": os.environ["FP"],   # base64(sha256(SPKI)) — fetched cert verified against this
-}
+doc = {"v": 1, "token": os.environ["TOKEN"], "fp": os.environ["FP"]}
+if os.environ.get("INCLUDE_HOST"):
+    doc["host"] = os.environ["GATEWAY_HOST"]  # fallback for mDNS-blocked networks
 print(base64.b64encode(json.dumps(doc).encode()).decode())
 PY
 )"
 echo
 echo "=== app pairing code (paste into Settings → Secure Gateway) ==="
 echo "$payload"
-echo "(${#payload} chars — cert is fetched+verified on pairing, not embedded)"
+echo "(${#payload} chars — host via mDNS, cert fetched+verified on pairing)"
 
 # Scannable QR for Settings → Secure Gateway → SCAN QR (Phase-3 pairing).
 if command -v qrencode >/dev/null 2>&1; then

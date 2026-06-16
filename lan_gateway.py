@@ -27,6 +27,8 @@ Access:
 
 import http.server
 import socketserver
+import base64
+import hashlib
 import json
 import os
 import sys
@@ -871,6 +873,70 @@ sessions = SessionManager()
 
 
 # ================================================================
+# PAIRING CODE  (loopback-only; the token must never reach a LAN client)
+# ================================================================
+
+def _spki_fp(cert_path: str) -> str:
+    """base64(sha256(SubjectPublicKeyInfo)) of the gateway cert — the exact
+    value the app verifies the fetched cert against (== OkHttp pin)."""
+    pub = subprocess.run(
+        ["openssl", "x509", "-in", cert_path, "-noout", "-pubkey"],
+        capture_output=True, check=True,
+    ).stdout
+    der = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-outform", "der"],
+        input=pub, capture_output=True, check=True,
+    ).stdout
+    return base64.b64encode(hashlib.sha256(der).digest()).decode()
+
+
+def pairing_code() -> tuple[str, str]:
+    """Return (base64-code, fp). The code is {v,token,fp} — host-less, the phone
+    finds the gateway via mDNS. Raises if the gateway isn't hardened."""
+    if not GATEWAY_TOKEN:
+        raise RuntimeError("gateway not hardened (no GATEWAY_TOKEN)")
+    fp = _spki_fp(GATEWAY_TLS_CERT)
+    doc = {"v": 1, "token": GATEWAY_TOKEN, "fp": fp}
+    return base64.b64encode(json.dumps(doc).encode()).decode(), fp
+
+
+def pairing_qr_svg(code: str) -> str:
+    """Render the pairing code as an inline SVG QR (qrencode)."""
+    out = subprocess.run(
+        ["qrencode", "-t", "SVG", "-o", "-", code],
+        capture_output=True, check=True,
+    ).stdout.decode("utf-8", "replace")
+    # Strip the XML prolog so it embeds cleanly inside the HTML page.
+    return out[out.find("<svg"):] if "<svg" in out else out
+
+
+def pairing_page_html(code: str, fp: str, svg: str) -> str:
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Pair Mazemaker</title><style>"
+        "body{background:#0b0b12;color:#e8e6f0;font-family:ui-monospace,Menlo,monospace;"
+        "margin:0;padding:32px;display:flex;flex-direction:column;align-items:center;gap:18px}"
+        "h1{font-size:18px;letter-spacing:3px;color:#b69cff;margin:0}"
+        ".qr{background:#fff;padding:16px;border-radius:12px;width:280px;height:280px}"
+        ".qr svg{width:100%;height:100%}"
+        ".code{word-break:break-all;background:#15151f;border:1px solid #2a2a3a;border-radius:8px;"
+        "padding:12px;max-width:480px;font-size:12px;color:#9fe7c4}"
+        ".muted{color:#7a7790;font-size:12px;max-width:480px;text-align:center;line-height:1.5}"
+        ".fp{color:#7a7790;font-size:11px}</style></head><body>"
+        "<h1>PAIR YOUR PHONE</h1>"
+        f"<div class='qr'>{svg}</div>"
+        "<div class='muted'>Mazemaker app → Settings → Secure Gateway → <b>SCAN QR</b>. "
+        "The phone finds this pod on the LAN (mDNS), fetches the certificate and "
+        "verifies it against the fingerprint below before pinning it — TLS + token + "
+        "AES end-to-end.</div>"
+        f"<div class='code' id='code'>{code}</div>"
+        f"<div class='fp'>fp sha256/{fp}</div>"
+        "</body></html>"
+    )
+
+
+# ================================================================
 # COMMAND EXECUTION
 # ================================================================
 
@@ -1294,7 +1360,35 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/sessions":
             result = execute_command("sessions")
             self._json_response(result)
-        
+
+        elif path in ("/pair", "/pair.json"):
+            # The pairing code carries the bearer token, so it must NEVER be
+            # served to a LAN client. Loopback only: open this from a browser ON
+            # the pod host (https://127.0.0.1:8443/pair) — e.g. the architect
+            # dashboard links here. Any LAN origin gets 403.
+            if not self._is_loopback():
+                self.send_response(403)
+                self.end_headers()
+                self.wfile.write(b"pairing is loopback-only (open from the pod host)")
+                return
+            try:
+                code, fp = pairing_code()
+            except Exception as exc:
+                self._json_response({"error": str(exc)}, 503)
+                return
+            if path == "/pair.json":
+                self._json_response({"code": code, "fp": fp})
+            else:
+                try:
+                    svg = pairing_qr_svg(code)
+                except Exception:
+                    svg = "<p>(install qrencode to render the QR)</p>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(pairing_page_html(code, fp, svg).encode())
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -1560,6 +1654,11 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             pass
         finally:
             upstream.close()
+
+    def _is_loopback(self) -> bool:
+        """True only when the request came from the pod host itself."""
+        ip = self.client_address[0] if self.client_address else ""
+        return ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
     def _json_response(self, data: dict, code: int = 200):
         """Send JSON response."""
