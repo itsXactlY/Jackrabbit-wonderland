@@ -113,6 +113,10 @@ def main():
         check("pod proxy blocks path traversal", isinstance(body, dict) and "invalid path" in str(body.get("error", "")))
         code, body = _post(base, {"cmd": "pod", "args": '{"method":"GET","path":"health"}'}, TOKEN)
         check("pod proxy dispatches with token", code == 200 and isinstance(body, dict))
+        # bridge proxy: same gating + traversal guard (bridge may be down in CI)
+        check("bridge proxy rejected w/o token", _post(base, {"cmd": "bridge", "args": "{}"})[0] == 401)
+        code, body = _post(base, {"cmd": "bridge", "args": '{"path":"../secret"}'}, TOKEN)
+        check("bridge proxy blocks path traversal", isinstance(body, dict) and "invalid path" in str(body.get("error", "")))
     finally:
         proc.terminate()
         proc.wait(timeout=5)

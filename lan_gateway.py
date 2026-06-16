@@ -101,7 +101,7 @@ GATEWAY_TOKEN = _load_gateway_token()
 # health stay open for liveness checks and the Web UI.
 PROTECTED_COMMANDS = _env_csv(
     "GATEWAY_PROTECTED_COMMANDS",
-    "shell,hermes,pulse,pod,encrypt,decrypt,key,roundtrip,session,kill",
+    "shell,hermes,pulse,pod,bridge,encrypt,decrypt,key,roundtrip,session,kill",
 )
 GATEWAY_TLS_CERT = os.path.expanduser(
     os.environ.get("GATEWAY_TLS_CERT", os.path.join(_HC_HOME, "gateway.crt"))
@@ -117,6 +117,13 @@ POD_BASE_URL = (
     os.environ.get("MM_POD_URL")
     or os.environ.get("MAZEMAKER_POD_URL")
     or "http://127.0.0.1:8765"
+).strip().rstrip("/")
+# Local hermes-bridge sidecar the `bridge` command + SSE route proxy to, so the
+# app's Hermes surface (chat, sessions, skills, …) also rides the hardened
+# channel instead of hitting :8769 plaintext.
+BRIDGE_BASE_URL = (
+    os.environ.get("MM_BRIDGE_URL")
+    or "http://127.0.0.1:8769"
 ).strip().rstrip("/")
 PULSE_SCRIPT = os.path.expanduser(
     os.environ.get("PULSE_SCRIPT", "~/projects/pulse/scripts/pulse.py")
@@ -862,6 +869,40 @@ sessions = SessionManager()
 # COMMAND EXECUTION
 # ================================================================
 
+def _proxy_http(base_url: str, label: str, args) -> dict:
+    """Forward {method,path,body,timeout} (JSON in `args`) to base_url and return
+    its JSON. Shared by `cmd:pod` (Mazemaker pod) and `cmd:bridge` (hermes-bridge).
+    Path is appended to base_url — no absolute URLs, no traversal."""
+    try:
+        spec = json.loads(args) if isinstance(args, str) and args.strip() else (args or {})
+    except (json.JSONDecodeError, TypeError):
+        return {"error": f"{label}: args must be JSON {{method,path,body}}"}
+    if not isinstance(spec, dict):
+        return {"error": f"{label}: args must be a JSON object"}
+    method = str(spec.get("method") or "GET").upper()
+    path = str(spec.get("path") or "").lstrip("/")
+    if not path or "://" in path or ".." in path:
+        return {"error": f"{label}: invalid path"}
+    url = base_url + "/" + path
+    body = spec.get("body")
+    payload = json.dumps(body).encode("utf-8") if (body is not None and method == "POST") else None
+    req = Request(
+        url, data=payload, method=method,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urlopen(req, timeout=float(spec.get("timeout", 120))) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {"raw": raw[:4000]}
+    except HTTPError as e:
+        return {"error": f"{label} HTTP {e.code}", "detail": e.read().decode("utf-8", "replace")[:500]}
+    except URLError as e:
+        return {"error": f"{label} unreachable: {e}"}
+
+
 def execute_command(cmd: str, args: str = "", encrypted: bool = False,
                     session_id: str = None) -> dict:
     """
@@ -1020,37 +1061,10 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
             return {"error": str(e)}
     
     elif cmd == "pod":
-        # Proxy a request to the local Mazemaker pod. args is a JSON string:
-        #   {"method":"POST","path":"tools/call","body":{...},"timeout":120}
-        # Path is appended to POD_BASE_URL — no absolute URLs, no traversal.
-        try:
-            spec = json.loads(args) if isinstance(args, str) and args.strip() else (args or {})
-        except (json.JSONDecodeError, TypeError):
-            return {"error": "pod: args must be JSON {method,path,body}"}
-        if not isinstance(spec, dict):
-            return {"error": "pod: args must be a JSON object"}
-        method = str(spec.get("method") or "GET").upper()
-        path = str(spec.get("path") or "").lstrip("/")
-        if not path or "://" in path or ".." in path:
-            return {"error": "pod: invalid path"}
-        url = POD_BASE_URL + "/" + path
-        body = spec.get("body")
-        payload = json.dumps(body).encode("utf-8") if (body is not None and method == "POST") else None
-        req = Request(
-            url, data=payload, method=method,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        try:
-            with urlopen(req, timeout=float(spec.get("timeout", 120))) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError:
-                return {"raw": raw[:4000]}
-        except HTTPError as e:
-            return {"error": f"pod HTTP {e.code}", "detail": e.read().decode("utf-8", "replace")[:500]}
-        except URLError as e:
-            return {"error": f"pod unreachable: {e}"}
+        return _proxy_http(POD_BASE_URL, "pod", args)
+
+    elif cmd == "bridge":
+        return _proxy_http(BRIDGE_BASE_URL, "bridge", args)
 
     elif cmd == "chaff":
         session = sessions.get_session(session_id)
@@ -1093,7 +1107,7 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
             return {"roundtrip": False, "error": str(e)}
     
     else:
-        return {"error": f"Unknown command: {cmd}", "help": "status, sessions, session, kill, hermes, pulse, pod, shell, encrypt, decrypt, chaff, key, roundtrip"}
+        return {"error": f"Unknown command: {cmd}", "help": "status, sessions, session, kill, hermes, pulse, pod, bridge, shell, encrypt, decrypt, chaff, key, roundtrip"}
 
 
 # ================================================================
@@ -1302,6 +1316,16 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_chat_completions(data)
             return
 
+        # Streaming Hermes chat — token-gated SSE passthrough to the bridge.
+        # Per-chunk AES doesn't fit SSE, so this rides TLS + token (the outer
+        # layer); the inner AES envelope covers the request/response surface.
+        if path == "/bridge/stream":
+            if not self._token_ok():
+                self._json_response({"error": "Unauthorized"}, 401)
+                return
+            self._proxy_bridge_stream(data)
+            return
+
         if path != "/command":
             self._json_response({"error": "Not found"}, 404)
             return
@@ -1491,6 +1515,43 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
     @staticmethod
     def _command_protected(cmd: str) -> bool:
         return bool(GATEWAY_TOKEN) and cmd.strip().lower() in PROTECTED_COMMANDS
+
+    def _proxy_bridge_stream(self, data: dict):
+        """Forward a chat request to the hermes-bridge /chat/stream and relay the
+        SSE byte stream straight back to the client (already token-authed, over TLS)."""
+        req = Request(
+            BRIDGE_BASE_URL + "/chat/stream",
+            data=json.dumps(data).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
+            method="POST",
+        )
+        try:
+            upstream = urlopen(req, timeout=600)
+        except HTTPError as e:
+            self._json_response(
+                {"error": f"bridge HTTP {e.code}", "detail": e.read().decode("utf-8", "replace")[:500]},
+                e.code,
+            )
+            return
+        except URLError as e:
+            self._json_response({"error": f"bridge unreachable: {e}"}, 502)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        try:
+            while True:
+                chunk = upstream.read(2048)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except Exception:
+            pass
+        finally:
+            upstream.close()
 
     def _json_response(self, data: dict, code: int = 200):
         """Send JSON response."""
