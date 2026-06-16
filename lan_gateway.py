@@ -101,7 +101,7 @@ GATEWAY_TOKEN = _load_gateway_token()
 # health stay open for liveness checks and the Web UI.
 PROTECTED_COMMANDS = _env_csv(
     "GATEWAY_PROTECTED_COMMANDS",
-    "shell,hermes,pulse,encrypt,decrypt,key,roundtrip,session,kill",
+    "shell,hermes,pulse,pod,encrypt,decrypt,key,roundtrip,session,kill",
 )
 GATEWAY_TLS_CERT = os.path.expanduser(
     os.environ.get("GATEWAY_TLS_CERT", os.path.join(_HC_HOME, "gateway.crt"))
@@ -109,6 +109,15 @@ GATEWAY_TLS_CERT = os.path.expanduser(
 GATEWAY_TLS_KEY = os.path.expanduser(
     os.environ.get("GATEWAY_TLS_KEY", os.path.join(_HC_HOME, "gateway.key"))
 )
+# Local Mazemaker pod the `pod` command proxies to. The gateway is the single
+# hardened front for mobile clients; `cmd:pod` forwards the pod's MCP/HTTP
+# shim surface (tools/call, memory/list, pod/settings, peer/*) over the same
+# token+AES+TLS envelope, so the app never has to speak to :8765 directly.
+POD_BASE_URL = (
+    os.environ.get("MM_POD_URL")
+    or os.environ.get("MAZEMAKER_POD_URL")
+    or "http://127.0.0.1:8765"
+).strip().rstrip("/")
 PULSE_SCRIPT = os.path.expanduser(
     os.environ.get("PULSE_SCRIPT", "~/projects/pulse/scripts/pulse.py")
 )
@@ -1010,6 +1019,39 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
         except ValueError as e:
             return {"error": str(e)}
     
+    elif cmd == "pod":
+        # Proxy a request to the local Mazemaker pod. args is a JSON string:
+        #   {"method":"POST","path":"tools/call","body":{...},"timeout":120}
+        # Path is appended to POD_BASE_URL — no absolute URLs, no traversal.
+        try:
+            spec = json.loads(args) if isinstance(args, str) and args.strip() else (args or {})
+        except (json.JSONDecodeError, TypeError):
+            return {"error": "pod: args must be JSON {method,path,body}"}
+        if not isinstance(spec, dict):
+            return {"error": "pod: args must be a JSON object"}
+        method = str(spec.get("method") or "GET").upper()
+        path = str(spec.get("path") or "").lstrip("/")
+        if not path or "://" in path or ".." in path:
+            return {"error": "pod: invalid path"}
+        url = POD_BASE_URL + "/" + path
+        body = spec.get("body")
+        payload = json.dumps(body).encode("utf-8") if (body is not None and method == "POST") else None
+        req = Request(
+            url, data=payload, method=method,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        try:
+            with urlopen(req, timeout=float(spec.get("timeout", 120))) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"raw": raw[:4000]}
+        except HTTPError as e:
+            return {"error": f"pod HTTP {e.code}", "detail": e.read().decode("utf-8", "replace")[:500]}
+        except URLError as e:
+            return {"error": f"pod unreachable: {e}"}
+
     elif cmd == "chaff":
         session = sessions.get_session(session_id)
         if session and session.get("remember"):
@@ -1051,7 +1093,7 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
             return {"roundtrip": False, "error": str(e)}
     
     else:
-        return {"error": f"Unknown command: {cmd}", "help": "status, sessions, session, kill, hermes, pulse, shell, encrypt, decrypt, chaff, key, roundtrip"}
+        return {"error": f"Unknown command: {cmd}", "help": "status, sessions, session, kill, hermes, pulse, pod, shell, encrypt, decrypt, chaff, key, roundtrip"}
 
 
 # ================================================================

@@ -106,6 +106,13 @@ def main():
             inner = json.loads(_aes_dec(ck, body["enc"])) if ok else {}
             check("encrypted round-trip both directions", ok and inner.get("gateway") == "running")
         check("bad enc on unknown session rejected", _post(base, {"session_id": "nope", "enc": "AAAA"})[0] in (400, 401))
+        # pod proxy: gated without a token; dispatches with one (pod may or may
+        # not be reachable in CI — either pod JSON or an explicit error is fine).
+        check("pod proxy rejected w/o token", _post(base, {"cmd": "pod", "args": "{}"})[0] == 401)
+        code, body = _post(base, {"cmd": "pod", "args": '{"path":"../etc/passwd"}'}, TOKEN)
+        check("pod proxy blocks path traversal", isinstance(body, dict) and "invalid path" in str(body.get("error", "")))
+        code, body = _post(base, {"cmd": "pod", "args": '{"method":"GET","path":"health"}'}, TOKEN)
+        check("pod proxy dispatches with token", code == 200 and isinstance(body, dict))
     finally:
         proc.terminate()
         proc.wait(timeout=5)
