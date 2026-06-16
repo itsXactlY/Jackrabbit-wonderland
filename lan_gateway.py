@@ -125,6 +125,11 @@ BRIDGE_BASE_URL = (
     os.environ.get("MM_BRIDGE_URL")
     or "http://127.0.0.1:8769"
 ).strip().rstrip("/")
+# How long the gateway waits on a proxied pod/bridge call before giving up.
+# This is the gateway's authority — clients (the app) do NOT get to dictate it.
+# Must be >= the bridge's MM_HERMES_TIMEOUT_SEC so the bridge's own 504 wins
+# the race and surfaces a clean error instead of a torn-off connection.
+GATEWAY_PROXY_TIMEOUT = _env_int("GATEWAY_PROXY_TIMEOUT", 900)
 PULSE_SCRIPT = os.path.expanduser(
     os.environ.get("PULSE_SCRIPT", "~/projects/pulse/scripts/pulse.py")
 )
@@ -890,8 +895,11 @@ def _proxy_http(base_url: str, label: str, args) -> dict:
         url, data=payload, method=method,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
+    # The proxy deadline is the gateway's config, NOT the caller's. Any
+    # `timeout` field the client sends is ignored on purpose — the app is a
+    # dumb slave; server config owns timeouts.
     try:
-        with urlopen(req, timeout=float(spec.get("timeout", 120))) as resp:
+        with urlopen(req, timeout=GATEWAY_PROXY_TIMEOUT) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
         try:
             return json.loads(raw)
@@ -1526,7 +1534,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             method="POST",
         )
         try:
-            upstream = urlopen(req, timeout=600)
+            upstream = urlopen(req, timeout=GATEWAY_PROXY_TIMEOUT)
         except HTTPError as e:
             self._json_response(
                 {"error": f"bridge HTTP {e.code}", "detail": e.read().decode("utf-8", "replace")[:500]},
