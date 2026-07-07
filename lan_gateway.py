@@ -897,6 +897,13 @@ def pairing_code() -> tuple[str, str]:
         raise RuntimeError("gateway not hardened (no GATEWAY_TOKEN)")
     fp = _spki_fp(GATEWAY_TLS_CERT)
     doc = {"v": 1, "token": GATEWAY_TOKEN, "fp": fp}
+    # Route C: if this pod publishes a circuit-relay, carry its public base URL
+    # so the phone can reach the pod OUTSIDE the LAN (keyed by fp) when mDNS
+    # can't see it. Bumps to v2; v1 clients ignore the extra field.
+    relay = os.environ.get("MM_RELAY_PUBLIC_URL", "").strip()
+    if relay:
+        doc["v"] = 2
+        doc["relay"] = relay
     return base64.b64encode(json.dumps(doc).encode()).decode(), fp
 
 
@@ -1783,6 +1790,18 @@ def main():
     # Start raw TCP server in background
     tcp_thread = threading.Thread(target=raw_tcp_server, args=(args.tcp_port,), daemon=True)
     tcp_thread.start()
+    # Route C: outbound circuit-relay so a phone can reach this pod from OUTSIDE
+    # the LAN with no inbound port here. Opt-in via MM_RELAY_URL (the wss the
+    # gateway dials); the relay is a blind pipe — it only ever forwards the
+    # already-AES-sealed /command envelope, keyed by our cert fingerprint.
+    relay_url = os.environ.get("MM_RELAY_URL", "").strip()
+    if relay_url and tls_enabled:
+        try:
+            import relay_client
+            relay_client.start(relay_url, args.tls_cert, args.tls_key, args.port)
+            print(f"  Relay: OUTBOUND → {relay_url} (out-of-network reach)")
+        except Exception as _relay_exc:  # noqa: BLE001
+            print(f"  Relay: FAILED to start ({_relay_exc})")
     
     # Create default session
     if not args.no_crypto:
