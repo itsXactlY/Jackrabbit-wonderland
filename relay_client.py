@@ -95,10 +95,13 @@ async def _serve(relay_url: str, cert_pem: str, key_pem: str, local_port: int):
                     continue
                 corr = frame.get("corr_id")
                 body = frame.get("body", "")
+                hdrs = {"Content-Type": "application/json"}
+                if frame.get("auth"):
+                    hdrs["Authorization"] = frame["auth"]
                 try:
                     async with session.post(
                         f"{local_base}/command", data=body,
-                        headers={"Content-Type": "application/json"},
+                        headers=hdrs,
                         ssl=noverify,
                     ) as r:
                         text = await r.text()

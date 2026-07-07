@@ -172,6 +172,10 @@ async def http_command(request: web.Request) -> web.Response:
     if request.content_length and request.content_length > MAX_BODY:
         return web.json_response({"error": "body too large"}, status=413)
     body = await request.text()
+    # The gateway authenticates on the Authorization: Bearer header. Carry it
+    # through (the token only ever authorizes to the user's own gateway, and the
+    # command body stays AES-sealed — the relay still can't read the request).
+    auth = request.headers.get("Authorization")
 
     corr = secrets.token_hex(16)
     loop = asyncio.get_event_loop()
@@ -180,7 +184,7 @@ async def http_command(request: web.Request) -> web.Response:
     try:
         await conn.ws.send_json({
             "type": "request", "corr_id": corr,
-            "path": "/command", "body": body,
+            "path": "/command", "body": body, "auth": auth,
         })
         frame = await asyncio.wait_for(fut, timeout=REQ_TIMEOUT)
     except asyncio.TimeoutError:
