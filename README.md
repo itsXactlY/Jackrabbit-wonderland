@@ -82,6 +82,45 @@ python3 tests/run_all.py plugin     # 23 tests — plugin lifecycle, tool encryp
 - DLM: TTL expiry, lock/unlock, identity isolation, overwrite, 5KB payload limit detection
 - Gateway: all API commands, response format, kill via args, roundtrip built-in, 100KB payloads
 
+## Route C — reach your pod from anywhere
+
+The gateway is LAN-first: a phone on the same Wi-Fi finds it via mDNS and pins
+its cert. **Route C** extends that to *outside* the LAN — with **no inbound port
+opened on the pod** and **no third party that can read the traffic**.
+
+```
+   phone  ──HTTPS POST──▶  relay (reachable host)  ◀──WSS out──  gateway (pod)
+```
+
+- **`relay.py`** — a blind pipe you host on any reachable box. The gateway dials
+  *out* to it over a persistent WebSocket and registers under its cert
+  fingerprint (`fp`); a client POSTs the exact same AES-sealed `/command`
+  envelope to `/gw/<fp>/command` and the relay forwards it down the matching
+  socket. The relay never holds a key that opens the envelope — it only routes
+  by `fp` and carries the `Authorization` header the gateway checks.
+- **`relay_client.py`** — the gateway side (started when `MM_RELAY_URL` is set).
+  It proves ownership of `fp` by signing a relay-issued nonce with the cert key,
+  then **replays** each forwarded request against the gateway's own
+  `https://127.0.0.1:<port>/command` — so the whole token + session + AES path
+  runs unchanged; the relay is purely additive.
+- The pairing code gains a `relay` field (`MM_RELAY_PUBLIC_URL`), so the QR
+  carries the relay URL and the app uses it automatically when mDNS finds
+  nothing.
+
+```bash
+# On a reachable host:
+MM_RELAY_BIND=0.0.0.0:9443 python3 relay.py    # deps: aiohttp, cryptography
+
+# On the pod (env for lan_gateway.py):
+MM_RELAY_URL=wss://relay.example/gw            # gateway dials this
+MM_RELAY_PUBLIC_URL=https://relay.example      # goes into the pairing QR
+```
+
+Trust model: registration is cert-bound (`sha256(SPKI) == fp` + signed nonce, so
+no one can squat another gateway's `fp`), and even if they could they'd only
+receive ciphertext they can't open. Confidentiality is the inner AES envelope,
+not the transport.
+
 ## What This Is
 ```
 ╔═══════════════════════════════════════════════════════════════╗
