@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The three apps — signed release builds · Wonderland · Hermes on Android</title>
+<meta name="description" content="Build and sign the three Android apps: Mazemaker 1.4.0 (the PRO client), Podroid 1.2.5 (the VM host), and thin-Hermes 0.2.0 — including the camera-16KB and R8/ML-Kit fixes that are load-bearing.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="apps" data-page="apps">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>The three apps</span></div>
+  <h1>The three apps</h1>
+  <p class="lead">Three release-signed APKs. Mazemaker is the PRO client that pairs with the gateway
+  and reaches the graph; Podroid hosts the VM; thin-Hermes is the standalone chat client for users
+  without Mazemaker. Never publish a debug-signed build.</p>
+
+  <h2 id="mazemaker">Mazemaker APK — <code>dev.mazemaker.mobile</code> 1.4.0 (code 7)</h2>
+  <p>Signing reads a <strong>gitignored</strong> <code>keystore.properties</code>; absent, release
+  falls back to the debug key so CI / fresh clones still build.</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">cd ~/projects/mazemaker-mobile/android
+cat &gt; keystore.properties &lt;&lt;'EOF'
+storeFile=keystore/mazemaker-release.jks
+storePassword=…
+keyAlias=…
+keyPassword=…
+EOF
+<span class="c"># one-time keystore (CN=Mazemaker Mobile):</span>
+keytool -genkeypair -v -keystore keystore/mazemaker-release.jks \
+  -alias mazemaker -keyalg RSA -keysize 4096 -validity 10000
+
+./gradlew assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk</pre>
+  </div>
+
+  <div class="adm warn">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      Two build settings are load-bearing bug fixes
+    </div>
+    <div class="adm-body">
+      <p><strong><code>camera-* 1.4.2+</code></strong> — 1.3.4's
+      <code>libimage_processing_util_jni.so</code> is 4 KB-aligned and Android 15+ rejects it on
+      16 KB-page devices ("isn't 16 KB compatible"). Measured: 1.3.4 = <code>0x1000</code>, 1.4.2+ =
+      <code>0x4000</code>.</p>
+      <p><strong><code>proguard-android.txt</code></strong> (non-optimize), <em>not</em>
+      <code>-optimize</code> — R8's optimize pass miscompiles the bundled ML-Kit barcode classes into
+      a <code>VerifyError</code> on the QR path. Shrinking + obfuscation stay on; only the optimize
+      pass is dropped. Applied defensively to thin-Hermes + iris too.</p>
+    </div>
+  </div>
+
+  <h3 id="wires">What the app wires up after pairing</h3>
+  <ul>
+    <li><code>GatewayClient</code> → desktop <code>:8443</code> (TLS pinned to <code>fp</code>, token bearer).</li>
+    <li><code>LocalPodMcpProxy</code> — a raw <code>ServerSocket</code> bound <strong>only</strong> to the AVF TAP interface (<code>10.198.95.x:8790</code>, guest-only); forwards <code>POST /mcp</code> through <code>gatewayProvider().pod(...)</code>. Lifecycle gated on <code>gatewayClient != null</code> (not <code>localPodAvailable</code> — that caused a restart feedback loop).</li>
+    <li>Settings → <strong>ON-DEVICE POD KEY</strong>: paste <code>api_server.key</code> → "pod unlocked".</li>
+    <li>Settings → <strong>Secure Gateway</strong>: paste base64 payload or SCAN QR → PAIR.</li>
+  </ul>
+
+  <h2 id="podroid">Podroid APK — <code>com.excp.podroid</code> 1.2.5 (code 28)</h2>
+  <p>Owns the VM; needs the two AVF permissions. Full build in
+  <a href="/podroid/">Podroid — the VM</a>.</p>
+
+  <h2 id="thin">Thin-Hermes APK — <code>dev.hermes.chat</code> 0.2.0 (code 2)</h2>
+  <p>The standalone chat client for users <strong>without</strong> the Mazemaker app — no MCP proxy,
+  talks straight to guest <code>:8088</code>. Same per-install-key paste field,
+  <code>proguard-android.txt</code>. Build the gutted client from its own worktree (a full-checkout
+  build pulls in old VM assets → 265 MB; the thin build is ~1.3 MB).</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">cd ~/projects/podroid-hermes/android && ./build-all.sh</pre>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>App</th><th>Package</th><th>Version</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>Mazemaker</td><td><code>dev.mazemaker.mobile</code></td><td>1.4.0 (7)</td><td>PRO client — pairs, proxies MCP, reaches the graph</td></tr>
+        <tr><td>Podroid</td><td><code>com.excp.podroid</code></td><td>1.2.5 (28)</td><td>Hosts the AVF Linux VM</td></tr>
+        <tr><td>thin-Hermes</td><td><code>dev.hermes.chat</code></td><td>0.2.0 (2)</td><td>Local-only chat, no MCP</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="pgnav">
+    <a href="/podroid/"><div class="dir">← Prev</div><div class="ttl">Podroid — the VM</div></a>
+    <a href="/pairing/" class="next"><div class="dir">Next →</div><div class="ttl">Pairing & verify</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

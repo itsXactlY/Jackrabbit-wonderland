@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Troubleshooting & security model · Wonderland · Hermes on Android</title>
+<meta name="description" content="Every gotcha that actually bit us building the Hermes-on-Android stack — gateway accept-queue wedge, AVF permissions, 16KB alignment, QR empty-host, proxy feedback loop, black screencap, relay 404 — plus the security model.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="troubleshooting" data-page="troubleshooting">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>Troubleshooting</span></div>
+  <h1>Troubleshooting</h1>
+  <p class="lead">The gotchas that actually bit us, each with the tell and the fix. If pairing or
+  recall misbehaves, one of these is almost always why.</p>
+
+  <h2 id="wedge">PAIR fails / gateway wedged accept queue</h2>
+  <p>Symptom: the app shows <code>✗ failed to connect to &lt;ip&gt;:8443 … after 6000ms</code>, and a
+  local TLS handshake from the desktop <em>itself</em> also times out — yet <code>ss</code> shows the
+  socket LISTENING. Diagnose the <strong>queue</strong>, not the network:</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span></div>
+<pre class="code-body">ss -tlnp | grep :8443     <span class="c"># BAD: "LISTEN 6 5" — Recv-Q(6) &gt; backlog(5)</span></pre>
+  </div>
+  <p>The TLS handshake happens in the server's accept path; dead half-open connections (piled up from
+  repeated PAIR taps before the phone had a stable WiFi/DHCP lease) starve <code>accept()</code> and
+  new SYNs drop. Fix:</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">systemctl --user restart mazemaker-apk-gateway.service   <span class="c"># → LISTEN 0 5, PAIR succeeds</span></pre>
+  </div>
+
+  <h2 id="empty-host">QR "Empty host" after pairing</h2>
+  <p>The QR payload carries no host (mDNS supplies it). Old builds only rebuilt the gateway client when
+  <code>_currentHost</code> was non-blank → QR users never connected. Fixed:
+  <code>applyGatewayConfig()</code> rebuilds unconditionally. <code>readTimeout=0</code> masked it (the
+  call never fired, so no error surfaced) — the app dictates <strong>no</strong> timeouts; the gateway
+  is the sole deadline authority.</p>
+
+  <h2 id="16kb">"isn't 16 KB compatible" dialog</h2>
+  <p>CameraX 1.3.4's native lib is 4 KB-aligned. Bump to <code>camera-* 1.4.2+</code>. A stale system
+  dialog can persist after the fix — dismiss + relaunch.</p>
+
+  <h2 id="python">hermes: <code>exec: /opt/hermes/venv/bin/hermes: not found</code></h2>
+  <p><code>python3</code> missing from the rootfs → dangling venv interpreter. It's in the
+  <code>apk add</code> list; rebuild the squashfs.</p>
+
+  <h2 id="loop">MCP proxy restart feedback loop</h2>
+  <p>Gating the proxy on <code>localPodAvailable</code> → a hermes restart drops <code>:8088</code> →
+  proxy killed → 0 tools → watcher restarts → loop. Gate on <code>gatewayClient != null</code> only.</p>
+
+  <h2 id="black">Black <code>adb screencap</code></h2>
+  <p>A locked or dozing phone screencaps pure black — not an R8 render bug. Unlock and recapture before
+  diagnosing anything visual.</p>
+
+  <h2 id="relay">Route C relay 404</h2>
+  <p><code>[relay-client] disconnected: 404 … wss://api.mazemaker.dev/relay/gw</code> in the gateway log
+  is the (down) remote relay for off-LAN reach. <strong>It does not affect LAN pairing or recall.</strong>
+  Ignore it when testing on-network.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Tell</th><th>Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>PAIR times out, local TLS too</td><td>Gateway accept queue wedged (<code>Recv-Q &gt; backlog</code>)</td><td>Restart the gateway service</td></tr>
+        <tr><td>"Empty host" after QR</td><td>Client rebuilt only on non-blank host</td><td>Fixed — rebuild unconditionally</td></tr>
+        <tr><td>"isn't 16 KB compatible"</td><td>CameraX 1.3.4 native lib alignment</td><td><code>camera-* 1.4.2+</code></td></tr>
+        <tr><td>hermes: interpreter not found</td><td>No <code>python3</code> in rootfs</td><td>Rebuild squashfs</td></tr>
+        <tr><td>hermes flaps, 0 tools</td><td>Proxy gated on <code>localPodAvailable</code></td><td>Gate on <code>gatewayClient != null</code></td></tr>
+        <tr><td>Black screenshots</td><td>Phone locked/dozing</td><td>Unlock, recapture</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="security">Security model — why "customer-safe"</h2>
+  <ul>
+    <li><strong>No hardcoded IP.</strong> Host is discovered via mDNS; the pairing code carries only <code>{v, token, fp}</code>. Optional <code>host</code> fallback is opt-in.</li>
+    <li><strong>No baked secrets.</strong> The gateway token + cert are provisioned per desktop; the <code>api_server.key</code> is generated per VM install and pasted once; provider keys are pasted, never shipped. Client code carries zero external hints.</li>
+    <li><strong>Pinned TLS.</strong> The app pins <code>sha256(SPKI)</code> from the scanned fingerprint — the trust anchor is the QR, not any CA.</li>
+    <li><strong>Loopback pod.</strong> <code>:8765</code> is reachable off-box only through the token+TLS+AES gateway; the raw pod has no auth by design (loopback only).</li>
+    <li><strong>PRO = the Mazemaker app.</strong> Installing it and pairing is what unlocks full federation into the desktop graph; the thin Hermes app stays local-only.</li>
+  </ul>
+
+  <div class="feedback">Was this page helpful?<button>👍 Yes</button><button>👎 No</button></div>
+  <nav class="pgnav">
+    <a href="/pairing/"><div class="dir">← Prev</div><div class="ttl">Pairing & verify</div></a>
+    <a href="/" class="next"><div class="dir">Next →</div><div class="ttl">Back to Home</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

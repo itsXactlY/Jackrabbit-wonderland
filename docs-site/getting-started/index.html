@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started — prerequisites & build order · Wonderland · Hermes on Android</title>
+<meta name="description" content="Host prerequisites for building the Hermes-on-Android stack: Podman, arm64 binfmt, JDK 17 + Android SDK, NVIDIA CDI — and the exact bottom-up build order.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="getting-started" data-page="getting-started">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>Get started</span></div>
+  <h1>Get started</h1>
+  <p class="lead">One desktop builds everything: the memory pod, the gateway, the VM image, and the
+  three APKs. This page gets that machine ready and lays out the build order. The operator's host is
+  Arch / Garuda — adapt package names for your distro.</p>
+
+  <div class="adm warn">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      Podman only
+    </div>
+    <div class="adm-body"><p>The whole stack is rootless Podman + Quadlet. Never <code>docker</code>,
+    <code>docker compose</code>, or a VM/SSH deploy. Where a command below says <code>podman</code>,
+    it means Podman.</p></div>
+  </div>
+
+  <h2 id="container">Container + VM-image tooling</h2>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash · arch/garuda</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">sudo pacman -S --needed podman qemu-user-static qemu-user-static-binfmt \
+                        avahi nss-mdns openssl qrencode
+sudo systemctl enable --now systemd-binfmt.service   <span class="c"># arm64 binfmt on Arch</span>
+sudo systemctl enable --now avahi-daemon.service      <span class="c"># mDNS advertisement</span>
+
+<span class="c"># Verify arm64 emulation for the rootfs build</span>
+podman run --rm --platform=linux/arm64 docker.io/alpine:3.23 uname -m   <span class="c"># → aarch64</span></pre>
+  </div>
+
+  <h2 id="android">Android build host</h2>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">sudo pacman -S --needed jdk17-openjdk android-tools
+export ANDROID_HOME="$HOME/Android/Sdk"
+<span class="c"># sdkmanager: platform 35, build-tools 35.0.0, platform-tools, NDK (for Podroid)</span>
+adb devices   <span class="c"># one arm64 device, e.g. UBV7N19122000968  device</span></pre>
+  </div>
+
+  <h2 id="gpu">GPU passthrough (NVIDIA CDI)</h2>
+  <p>The stack is GPU-first: embedding, recall, ColBERT and DAE all run on GPU, and on a GPU host the
+  installer rewrites pod images <code>:latest → :gpu</code>. Generate the CDI device so rootless
+  Podman can pass the GPU through.</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+podman run --rm --device nvidia.com/gpu=all docker.io/nvidia/cuda:12-base nvidia-smi</pre>
+  </div>
+
+  <h2 id="order">Build order</h2>
+  <p>Build bottom-up — each layer depends on the one below it being live.</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Layer</th><th>Page</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Memory pod up on the desktop (<code>:8765</code>)</td><td><a href="/pod/">The memory pod</a></td></tr>
+        <tr><td>2</td><td>PRO gateway provisioned + running (<code>:8443</code>, mDNS)</td><td><a href="/gateway/">The PRO gateway</a></td></tr>
+        <tr><td>3</td><td>Podroid rootfs squashfs + APK built and installed</td><td><a href="/podroid/">Podroid — the VM</a></td></tr>
+        <tr><td>4</td><td>hermes-agent boots in the VM, per-install key generated</td><td><a href="/podroid/#hermes">hermes-agent & the key</a></td></tr>
+        <tr><td>5</td><td>The three signed apps installed</td><td><a href="/apps/">The three apps</a></td></tr>
+        <tr><td>6</td><td>Pair, wire, and verify end-to-end</td><td><a href="/pairing/">Pairing & verify</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="adm note">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      Two Podroid variants exist — use the AVF one
+    </div>
+    <div class="adm-body"><p>The verified, shipping variant is the <strong>AVF/pKVM</strong> Podroid
+    (a full Alpine squashfs VM). An older proot-based thin app also exists in the tree; these docs
+    describe the AVF variant only.</p></div>
+  </div>
+
+  <nav class="pgnav">
+    <a href="/"><div class="dir">← Prev</div><div class="ttl">Home</div></a>
+    <a href="/pod/" class="next"><div class="dir">Next →</div><div class="ttl">The memory pod</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Podroid — the Linux VM on the phone · Wonderland · Hermes on Android</title>
+<meta name="description" content="Build the rootless Alpine 3.23 squashfs that boots on Android's Virtualization Framework, bake hermes-agent with a per-install key, grant the two AVF permissions, and boot the VM in ~6 seconds.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="podroid" data-page="podroid">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>Podroid — the VM</span></div>
+  <h1>Podroid — the Linux VM</h1>
+  <p class="lead">A rootless Alpine 3.23 squashfs + persistent ext4 overlay, OpenRC as PID 1, booted
+  by crosvm inside Android's Virtualization Framework (AVF / pKVM). This is the shipping variant —
+  <strong>not</strong> the older proot thin app. Source:
+  <code>~/projects/jrwl-messenger/android/podroid</code>.</p>
+
+  <h2 id="rootfs">Build the Alpine rootfs squashfs</h2>
+  <p><code>build-rootfs/build-rootfs.sh</code> (run inside <code>Dockerfile.rootfs</code>) <code>apk
+  add</code>s the base system — <code>alpine-base openrc podman crun fuse-overlayfs nftables dropbear
+  curl ca-certificates shadow-uidmap slirp4netns aardvark-dns netavark <b>python3</b> …</code> — sets
+  rootless uid-map caps, then <strong>bakes the hermes pod</strong>: the <code>podroid-hermes</code>
+  and <code>podroid-hermes-mcp</code> OpenRC services, the hermes venv at <code>/opt/hermes</code>,
+  and the seed files, all added to the boot runlevel.</p>
+
+  <div class="adm danger">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      python3 is mandatory
+    </div>
+    <div class="adm-body"><p>hermes-agent's api_server is a Python venv. A rootfs without
+    <code>python3</code> dies with <code>exec: /opt/hermes/venv/bin/hermes: not found</code> (dangling
+    interpreter). Alpine 3.23.4 ships Python 3.12.13, matching the venv's <code>pyvenv.cfg</code>.</p></div>
+  </div>
+
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">cd ~/projects/jrwl-messenger/android/podroid
+./build-all.sh rootfs
+<span class="c"># → app/src/main/assets/alpine-rootfs.squashfs  (~384 MB)</span></pre>
+  </div>
+
+  <h2 id="apk">Build + install the Podroid APK</h2>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">./build-all.sh              <span class="c"># build_rootfs (if stale) then ./gradlew assemble…</span>
+<span class="c"># com.excp.podroid 1.2.5 (versionCode 28)</span>
+
+DEV=&lt;adb-serial&gt;
+adb -s $DEV install -r app/build/outputs/apk/release/app-release.apk</pre>
+  </div>
+
+  <h2 id="perms">Grant the AVF permissions</h2>
+  <p>AVF is gated behind two privileged permissions that are <strong>revoked on every reinstall</strong>.
+  Without them crosvm can't open the TAP and the VM dead-ends (easily misread as
+  <code>TUNSETIFF EACCES</code>).</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">PKG=com.excp.podroid        <span class="c"># or .debug</span>
+adb -s $DEV shell pm grant $PKG android.permission.MANAGE_VIRTUAL_MACHINE
+adb -s $DEV shell pm grant $PKG android.permission.USE_CUSTOM_VIRTUAL_MACHINE
+adb -s $DEV shell am force-stop $PKG      <span class="c"># EngineHolder resolves the engine</span>
+adb -s $DEV shell monkey -p $PKG 1        <span class="c">#   once per process — relaunch</span>
+
+<span class="c"># Verify GRANTED (dumpsys lists *requested* perms even when not granted):</span>
+adb -s $DEV shell dumpsys package $PKG | grep -A1 VIRTUAL_MACHINE | grep granted=true</pre>
+  </div>
+  <p>Boot the VM from the app. On AVF/pKVM it comes up in ~6 s; only fall back to QEMU/TCG emulation
+  (~190 s) on non-KVM devices.</p>
+
+  <h2 id="hermes">hermes-agent & the per-install key</h2>
+  <p>hermes-agent 0.15.1 (Nous Research) runs inside the guest as an OpenAI-compatible
+  <code>api_server</code> on <code>:8088</code>, forwarded to Android loopback.
+  <strong>No key ships in anything.</strong> On first boot <code>start.sh</code>:</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">sh · /opt/hermes/start.sh</span><span class="sp"></span></div>
+<pre class="code-body"><span class="c"># generate a per-install key if absent, persist in the overlay</span>
+[ -s /opt/hermes/api_server.key ] || \
+  python3 -c 'import secrets;print(secrets.token_hex(32))' &gt; /opt/hermes/api_server.key
+<span class="c"># seed config.template.yaml → config.yaml (openrouter_free, EMPTY api_key)</span></pre>
+  </div>
+  <p><code>api_server</code> <strong>enforces</strong> the key (no bearer → 401) and <strong>refuses to
+  start</strong> with an empty key. Read it once to paste into the apps:</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">sh · in the Podroid terminal (guest)</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">cat /opt/hermes/api_server.key      <span class="c"># 64 hex chars</span></pre>
+  </div>
+  <p>The model provider key (OpenRouter etc.) is likewise empty in the template — paste it into
+  <code>/opt/hermes/config.yaml</code>. Nothing is baked into the binaries.</p>
+
+  <nav class="pgnav">
+    <a href="/gateway/"><div class="dir">← Prev</div><div class="ttl">The PRO gateway</div></a>
+    <a href="/apps/" class="next"><div class="dir">Next →</div><div class="ttl">The three apps</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

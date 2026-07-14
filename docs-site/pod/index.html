@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The memory pod — rootless Podman Quadlets · Wonderland · Hermes on Android</title>
+<meta name="description" content="Bring up the Mazemaker memory pod on the desktop: rootless Podman Quadlets for mcp, embedding-worker, pgvector and dream-worker; secrets, the license gate, GPU, and the single published port 8765.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="pod" data-page="pod">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>The memory pod</span></div>
+  <h1>The memory pod</h1>
+  <p class="lead">The Mazemaker engine, running as a rootless Podman pod under Quadlet +
+  <code>systemd --user</code>. It's the graph the phone will recall from. Only one port
+  (<code>:8765</code>) is published; everything else is pod-internal.</p>
+
+  <h2 id="secrets">Secrets, license, config</h2>
+  <p>One-time setup. The license (a Pro/Enterprise JWT + its Ed25519 pubkey) is what unlocks the
+  Postgres backend, ColBERT, REM, Insight and DAE — without it, mcp silently drops to the SQLite
+  community tier and splits writes from the dream-worker.</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">mkdir -p ~/.mazemaker/{data,pgvector-data,sockets}
+
+<span class="c"># PG password as a rootless podman secret (both containers reference it)</span>
+printf '%s' "$(openssl rand -hex 24)" | podman secret create mazemaker_pg_password -
+
+<span class="c"># License JWT + Ed25519 pubkey — required for the Postgres tier</span>
+cp &lt;your&gt;/license.jwt         ~/.mazemaker/license.jwt
+cp &lt;your&gt;/jwt.v1.pub.ed25519  ~/.mazemaker/jwt.v1.pub.ed25519
+
+<span class="c"># Backend + compute selectors</span>
+printf '[backend]\nkind = "postgres"\n' &gt; ~/.mazemaker/db.toml
+printf '[compute]\ndevice = "auto"\n'   &gt; ~/.mazemaker/compute.toml</pre>
+  </div>
+
+  <h2 id="units">The Quadlet units</h2>
+  <p>Units live in <code>~/.config/containers/systemd/</code>. Images are <strong>local-only</strong>;
+  <code>.container.d/</code> drop-ins set <code>Pull=never</code>.</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Unit</th><th>Image</th><th>Port</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td><code>mazemaker.pod</code></td><td>—</td><td><b>8765 published</b></td><td>pod, wonderland MCP front</td></tr>
+        <tr><td><code>mazemaker-mcp</code></td><td><code>…-mcp:latest</code> (<span class="pill pro">:gpu on Pro</span>)</td><td>8000</td><td>MCP server + neural-memory engine</td></tr>
+        <tr><td><code>mazemaker-embedding-worker</code></td><td><code>…-embedding-worker:latest</code></td><td>8766</td><td>bge-m3 embeddings, GPU</td></tr>
+        <tr><td><code>mazemaker-pgvector</code></td><td><code>pgvector/pgvector:pg16-trixie</code></td><td>5432</td><td>Postgres + pgvector</td></tr>
+        <tr><td><code>mazemaker-license-client</code></td><td>—</td><td>8767</td><td>license gate</td></tr>
+        <tr><td><code>mazemaker-dream-worker</code></td><td><code>…-dream-worker:gpu</code></td><td>—</td><td>NREM / REM / Insight consolidation</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="invariants">Invariants baked into the units</h3>
+  <ul>
+    <li><code>AddDevice=nvidia.com/gpu=all</code> on mcp + embedding + dream (stripped on non-CDI hosts).</li>
+    <li><code>MM_DREAM_DISABLED=1</code> on mcp — the in-pod dream loop is off so it doesn't fight the interactive path for the GPU; the dream-worker container consolidates instead.</li>
+    <li><code>MemoryMax</code>: mcp 8G, pgvector 8G, embedding 6G (tuned on a 200k corpus; bump for &gt;500k).</li>
+    <li>Only <code>:8765</code> is published; it binds <code>0.0.0.0</code> for federation but authorization is the pre-shared peer_key — a LAN scanner sees the pod, can't sync.</li>
+  </ul>
+
+  <div class="adm danger">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      Never prune untagged layers
+    </div>
+    <div class="adm-body"><p>The <code>mazemaker-v2</code> images are local-only. <code>podman image
+    prune</code> on untagged layers → crash-loop, because <code>Pull=never</code> can't refetch them.
+    Re-tag by env signature if you must clean up.</p></div>
+  </div>
+
+  <h2 id="up">Bring it up</h2>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">systemctl --user daemon-reload
+systemctl --user start mazemaker-pod.service
+systemctl --user status mazemaker-mcp.service     <span class="c"># wait for GpuRecall warm-up</span>
+
+<span class="c"># Smoke test — MCP is stateless JSON in/out, no SSE or session needed</span>
+curl -s -H 'Accept: application/json' -H 'Content-Type: application/json' \
+  http://127.0.0.1:8765/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 400
+<span class="c"># → 31 tools (mazemaker_recall, mazemaker_remember, …)</span></pre>
+  </div>
+
+  <nav class="pgnav">
+    <a href="/getting-started/"><div class="dir">← Prev</div><div class="ttl">Get started</div></a>
+    <a href="/gateway/" class="next"><div class="dir">Next →</div><div class="ttl">The PRO gateway</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

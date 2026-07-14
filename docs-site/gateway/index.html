@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The PRO gateway — TLS + token + AES bridge · Wonderland · Hermes on Android</title>
+<meta name="description" content="Provision and run the hermes-crypto PRO gateway: TLS + bearer token + AES over the loopback-only pod, a tiny base64 pairing code, and mDNS advertisement so the phone needs no hardcoded IP.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="gateway" data-page="gateway">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>The PRO gateway</span></div>
+  <h1>The PRO gateway</h1>
+  <p class="lead">The pod listens only on loopback with no auth. The gateway
+  (<code>~/projects/hermes-crypto</code>) is the encrypted bridge the phone dials: it wraps the pod in
+  TLS + a bearer token + AES, and proxies <code>cmd:pod</code> requests — including <code>/mcp</code> —
+  straight through to <code>:8765</code>.</p>
+
+  <h2 id="pairing">Provision token, cert & pairing code</h2>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">cd ~/projects/hermes-crypto
+./provision-apk.sh          <span class="c"># autodetects primary LAN IPv4 + 127.0.0.1</span></pre>
+  </div>
+  <p>Writes to <code>~/.hermes-crypto/</code>:</p>
+  <ul>
+    <li><code>gateway.token</code> — <code>openssl rand -hex 32</code>, gates every request.</li>
+    <li><code>gateway.crt</code> / <code>gateway.key</code> — self-signed RSA-4096, SANs for each LAN IP, <code>CN=mazemaker-gateway</code>, 10-year.</li>
+  </ul>
+  <p>and prints the <strong>pairing code</strong> — a tiny <code>base64(JSON{v,token,fp})</code> where
+  <code>fp = base64(sha256(SPKI))</code>.</p>
+
+  <div class="adm tip">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+      No IP, no cert in the code
+    </div>
+    <div class="adm-body"><p>The pairing code carries <strong>no host</strong> (mDNS supplies
+    host:port) and <strong>no cert</strong> (the app fetches the cert at pair time and verifies
+    <code>sha256(SPKI) == fp</code> before pinning). The scanned fingerprint is the whole trust
+    anchor. For mDNS-blocked networks: <code>MM_GATEWAY_INCLUDE_HOST=1 ./provision-apk.sh</code> bakes
+    a host fallback. A scannable QR is emitted too (needs <code>qrencode</code>).</p></div>
+  </div>
+
+  <h2 id="services">The systemd services</h2>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body"><span class="c"># gateway (systemd --user)</span>
+systemctl --user enable --now mazemaker-apk-gateway.service
+<span class="c">#   ExecStart: python3 lan_gateway.py --port 8443 --tcp-port 38374 --bind 0.0.0.0</span>
+<span class="c">#   Env: MM_POD_URL=http://127.0.0.1:8765   (the cmd:pod target)</span>
+
+<span class="c"># mDNS advertisement — the phone finds host:port with no baked IP</span>
+systemctl --user enable --now mazemaker-apk-gateway-mdns.service
+<span class="c">#   avahi-publish-service "Mazemaker Gateway" _mazemaker-gw._tcp 8443 v=1 fp=… a=&lt;lan-ip&gt;</span>
+
+<span class="c"># Health — Recv-Q MUST be 0 (see Troubleshooting)</span>
+ss -tlnp | grep :8443        <span class="c"># → LISTEN 0 5</span></pre>
+  </div>
+
+  <div class="adm note">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      install.sh is the all-in-one path
+    </div>
+    <div class="adm-body"><p><code>./install.sh</code> sets up the JackrabbitDLM key vault, the crypto
+    middleware, the service, and LAN-only nftables rules in one shot. <code>--check</code> verifies,
+    <code>--uninstall</code> removes.</p></div>
+  </div>
+
+  <nav class="pgnav">
+    <a href="/pod/"><div class="dir">← Prev</div><div class="ttl">The memory pod</div></a>
+    <a href="/podroid/" class="next"><div class="dir">Next →</div><div class="ttl">Podroid — the VM</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

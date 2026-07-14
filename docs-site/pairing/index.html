@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pairing, wiring & end-to-end verify · Wonderland · Hermes on Android</title>
+<meta name="description" content="The PRO-federation moment: paste the pod key, scan or paste the pairing code, watch the MCP proxy bind and the guest watcher wire hermes, then run the end-to-end recall acceptance test. Plus website deploy.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="pairing" data-page="pairing">
+
+<main class="content">
+  <div class="breadcrumb"><a href="/">Home</a> › <span>Pairing & verify</span></div>
+  <h1>Pairing, wiring & verify</h1>
+  <p class="lead">Everything is built; now connect it. This is the "PRO federation" moment — installing
+  Mazemaker and pairing is what unlocks full federation into the desktop graph.</p>
+
+  <h2 id="steps">Pair & wire</h2>
+  <p>With the pod + gateway up on the desktop:</p>
+  <ol>
+    <li><strong>Podroid</strong> → boot the VM. Open the terminal, <code>cat /opt/hermes/api_server.key</code>.</li>
+    <li><strong>Mazemaker → Settings → ON-DEVICE POD KEY</strong> → paste the key → SAVE KEY → "● pod unlocked".</li>
+    <li><strong>Mazemaker → Settings → Secure Gateway</strong> → paste the base64 pairing code (or SCAN QR) → <strong>PAIR</strong>.
+      <ul>
+        <li>App finds the gateway via mDNS <code>_mazemaker-gw._tcp</code>, fetches its cert, verifies <code>sha256(SPKI) == fp</code>, pins it, stores the token.</li>
+        <li>Success: <code>● ENCRYPTED — TLS + token + AES via gateway</code>, <code>● Paired with &lt;ip&gt;:8443</code>, POD CONNECTION auto-filled.</li>
+      </ul>
+    </li>
+    <li>On pairing, <code>gatewayClient != null</code> → <code>LocalPodMcpProxy</code> binds the AVF TAP <code>:8790</code> (<code>MzkMcpProxy: MCP proxy listening on 10.198.95.x:8790 (guest-only)</code>).</li>
+    <li>Inside the guest, the <code>podroid-hermes-mcp</code> watcher resolves the default gateway, writes <code>mcp_servers.mazemaker = http://&lt;gw&gt;:8790/mcp</code>, and restarts <code>podroid-hermes</code> when the proxy is reachable but hermes has 0 tools — loading the 31 mazemaker tools.</li>
+  </ol>
+
+  <div class="adm tip">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+      The recall path is now live
+    </div>
+    <div class="adm-body"><p><strong>guest hermes → app :8790 → gateway :8443 (<code>cmd:pod</code>
+    <code>/mcp</code>) → pod :8765 → mazemaker graph.</strong> No hardcoded IP anywhere in the chain;
+    the per-install key gates the local hop, the pinned cert + token gate the LAN hop.</p></div>
+  </div>
+
+  <h2 id="verify">End-to-end verify (release)</h2>
+  <p>The acceptance test — everything on release builds.</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash · desktop</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body"><span class="c"># 1. pod + gateway healthy</span>
+curl -s -H 'Accept: application/json' http://127.0.0.1:8765/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' &gt;/dev/null &amp;&amp; echo POD_OK
+ss -tlnp | grep :8443 | grep -q 'LISTEN 0' &amp;&amp; echo GATEWAY_OK</pre>
+  </div>
+  <p>On the phone, with the VM booted, Mazemaker <code>[POD·ON]</code>, pod unlocked and paired — open
+  the Hermes tab and send:</p>
+  <div class="adm example">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6l-1 7h3l-7 11 1-7H6Z"/></svg>
+      The prompt
+    </div>
+    <div class="adm-body"><p>"Nutze dein <code>mazemaker_recall</code> Tool. Suche ColBERT dedup und
+    gib mir memory-id plus Inhalt."</p></div>
+  </div>
+  <p><strong>Pass criteria:</strong> hermes replies with real graph content in mazemaker's
+  <code>id + similarity</code> format. Verified run: top hit <code>id=955714 @ 0.5624</code>, plus
+  <code>955710/955709</code> and real commit SHAs. Confirm it isn't hallucinated:</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">mcp · desktop</span><span class="sp"></span></div>
+<pre class="code-body">mazemaker_get(memory_id=955714)   <span class="c"># → found:true, the 2026-07-08 ColBERT-dedup memory</span></pre>
+  </div>
+  <p>If <code>mazemaker_get</code> returns <code>found:true</code> and the content matches, the whole
+  chain — release VM → app proxy → encrypted gateway → pod → graph — is proven.</p>
+
+  <h2 id="deploy">Deploy the website</h2>
+  <p>The marketing + docs site is Cloudflare Pages
+  (<code>~/projects/mazemaker-v2-stack/frontend</code>).</p>
+  <div class="code">
+    <div class="code-top"><span class="lang">bash</span><span class="sp"></span><button class="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+<pre class="code-body">cd ~/projects/mazemaker-v2-stack/frontend
+./deploy-pages.sh          <span class="c"># curl Cloudflare API ($ACCOUNT/$PROJECT/token)</span>
+<span class="c"># or: wrangler pages deploy &lt;dir&gt; --project-name &lt;project&gt;   (wrangler login if the API token path fails)</span></pre>
+  </div>
+
+  <nav class="pgnav">
+    <a href="/apps/"><div class="dir">← Prev</div><div class="ttl">The three apps</div></a>
+    <a href="/troubleshooting/" class="next"><div class="dir">Next →</div><div class="ttl">Troubleshooting</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes on Android — a real Linux agent on your unrooted phone · Wonderland docs</title>
+<meta name="description" content="Build-and-deploy documentation for running hermes-agent natively in a rootless Linux VM on a stock, unrooted Android phone — wired to your Mazemaker memory pod over an encrypted PRO gateway. No hardcoded IPs, no baked secrets. Part of the Wonderland family.">
+<link rel="stylesheet" href="/assets/docs.css">
+<script src="/assets/boot.js"></script>
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Wonderland · Hermes on Android">
+<meta property="og:title" content="Hermes on Android — a real Linux agent on your unrooted phone">
+<meta property="og:description" content="Run hermes-agent in a rootless Linux VM on an unrooted phone, wired to your Mazemaker memory pod over an encrypted gateway. No hardcoded IPs, no baked secrets.">
+<meta name="theme-color" content="#0e0e12">
+</head>
+<body data-tab="home" data-page="home">
+
+<main class="content">
+  <div class="breadcrumb"><span>Wonderland</span> › <span>Hermes on Android</span> › <span>Home</span></div>
+  <h1>A real Linux agent — on your unrooted phone</h1>
+  <p class="lead">This is the complete, from-scratch build-and-deploy guide for running
+  <strong>hermes-agent natively inside a rootless Linux VM (Podroid)</strong> on a stock,
+  unrooted Android phone — wired straight into your <strong>Mazemaker memory pod</strong> over an
+  encrypted PRO gateway. <strong>Zero hardcoded IPs. Zero baked secrets.</strong> Install the
+  Mazemaker app and you get the PRO tier: full federation into your desktop's ~200k-memory graph.</p>
+
+  <div class="stats">
+    <div class="stat"><b>~6s</b><span>VM boot on AVF / pKVM</span></div>
+    <div class="stat"><b>0</b><span>hardcoded IPs · secrets in the APKs</span></div>
+    <div class="stat"><b>3</b><span>trust anchors: loopback · token+cert · per-install key</span></div>
+    <div class="stat"><b>31</b><span>mazemaker MCP tools the phone reaches</span></div>
+  </div>
+
+  <div class="adm tip">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.2 1 2.5h6c0-1.3.3-1.8 1-2.5A6 6 0 0 0 12 3Z"/></svg>
+      New here? Read the architecture, then build in order.
+    </div>
+    <div class="adm-body"><p>The stack is six layers — pod, gateway, VM, agent, apps, pairing —
+    and they build bottom-up. Skim <a href="#picture">the picture</a> below, then start at
+    <a href="/getting-started/">Get started → Prerequisites</a>.</p></div>
+  </div>
+
+  <h2 id="picture">The architecture</h2>
+  <p>One phone, one desktop, one encrypted hop between them. The phone never learns an IP at build
+  time and no binary ships a secret — everything is discovered (mDNS) or pasted once (keys).</p>
+
+  <div class="code">
+    <div class="code-top"><span class="lang">the recall path</span><span class="sp"></span></div>
+<pre class="code-body">  DESKTOP (GPU host)
+    Mazemaker POD  (rootless Podman / Quadlet)
+      mazemaker-mcp :8000 · wonderland front :8765 (published)
+      embedding-worker :8766 (bge-m3, GPU) · pgvector · dream-worker
+                  ▲ http://127.0.0.1:8765  (loopback, zero auth)
+    PRO gateway  lan_gateway.py :8443
+      TLS + bearer token + AES + cmd:pod proxy   ·  mDNS _mazemaker-gw._tcp
+                  ▲  LAN  (TLS, token-gated, cert pinned by fingerprint)
+  PHONE (unrooted)
+    Mazemaker APK   GatewayClient → :8443   ·   LocalPodMcpProxy → 10.198.95.x:8790
+    Podroid APK     AVF / pKVM VM (crosvm), Alpine squashfs + ext4 overlay
+      GUEST: hermes-agent :8088 (per-install key)
+             podroid-hermes-mcp watcher → mcp_servers.mazemaker = http://&lt;gw&gt;:8790/mcp
+
+  recall:  guest hermes → app :8790 → gateway :8443 (cmd:pod /mcp)
+           → pod :8765 → mazemaker MCP → 200k memory graph</pre>
+  </div>
+
+  <div class="adm example">
+    <div class="adm-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6l-1 7h3l-7 11 1-7H6Z"/></svg>
+      Proven, not aspirational
+    </div>
+    <div class="adm-body"><p>Verified end-to-end on <em>release</em> builds: a Hermes chat on the
+    phone called <code>mazemaker_recall</code> through the whole chain and returned a real memory in
+    the graph's <code>id + similarity</code> format — top hit <code>id=955714 @ 0.5624</code>,
+    confirmed non-hallucinated with <code>mazemaker_get(955714)</code>.</p></div>
+  </div>
+
+  <h2 id="start">Where to start</h2>
+  <div class="cards">
+    <a class="card" href="/getting-started/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      <h3>Get started</h3>
+      <p>Host prerequisites — Podman, arm64 binfmt, JDK 17 + Android SDK, NVIDIA CDI — and the exact bottom-up build order.</p>
+    </a>
+    <a class="card" href="/pod/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+      <h3>The memory pod</h3>
+      <p>Rootless Podman Quadlets: mcp, embedding-worker, pgvector, dream-worker. Secrets, the license gate, GPU, and the single published port.</p>
+    </a>
+    <a class="card" href="/gateway/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <h3>The PRO gateway</h3>
+      <p>TLS + token + AES over the loopback-only pod. Provision the cert, print the tiny base64 pairing code, advertise via mDNS.</p>
+    </a>
+    <a class="card" href="/podroid/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg>
+      <h3>Podroid — the VM</h3>
+      <p>A rootless Alpine 3.23 squashfs on AVF/pKVM. Build the rootfs, bake hermes, grant the two AVF permissions, boot in ~6 s.</p>
+    </a>
+    <a class="card" href="/apps/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+      <h3>The three apps</h3>
+      <p>Mazemaker 1.4.0, Podroid 1.2.5, thin-Hermes 0.2.0 — signed release builds, with the camera-16KB and R8 fixes that are load-bearing.</p>
+    </a>
+    <a class="card" href="/pairing/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+      <h3>Pairing & verify</h3>
+      <p>Paste the pod key, scan/paste the pairing code, watch the proxy bind, and run the end-to-end recall acceptance test.</p>
+    </a>
+  </div>
+
+  <h2 id="family">Part of the Wonderland family</h2>
+  <p>Wonderland is the product family behind the <a href="https://github.com/itsXactlY/Jackrabbit-wonderland" target="_blank" rel="noopener">Jackrabbit-wonderland</a>
+  repo. <strong>Mazemaker</strong> is the memory operating system for your agents; <strong>Hermes on
+  Android</strong> is the pocket edition — the same graph, reached from a phone. These docs mirror the
+  <a href="https://mazemaker.online/docs/" target="_blank" rel="noopener">Mazemaker docs</a> on purpose:
+  same shell, same conventions, one family.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Layer</th><th>What it is</th><th>Where it runs</th></tr></thead>
+      <tbody>
+        <tr><td>Memory pod</td><td>Mazemaker engine + pgvector + bge-m3, 31 MCP tools</td><td>Desktop (GPU), rootless Podman</td></tr>
+        <tr><td>PRO gateway</td><td>TLS + token + AES bridge, <code>cmd:pod</code> proxy</td><td>Desktop, <code>systemd --user</code></td></tr>
+        <tr><td>Podroid</td><td>Rootless Alpine VM on AVF/pKVM</td><td>Phone (unrooted)</td></tr>
+        <tr><td>hermes-agent</td><td>OpenAI-compatible agent, per-install key</td><td>Inside the VM, <code>:8088</code></td></tr>
+        <tr><td>Android apps</td><td>Mazemaker · Podroid · thin-Hermes</td><td>Phone</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="feedback">Was this page helpful?<button>👍 Yes</button><button>👎 No</button></div>
+  <nav class="pgnav">
+    <span></span>
+    <a href="/getting-started/" class="next"><div class="dir">Next →</div><div class="ttl">Get started</div></a>
+  </nav>
+</main>
+
+<script src="/assets/shell.js" defer></script>
+</body>
+</html>
