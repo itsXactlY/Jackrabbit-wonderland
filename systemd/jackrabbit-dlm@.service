@@ -4,6 +4,16 @@ Documentation=https://github.com/rapmd73/JackrabbitDLM
 After=network-online.target
 Wants=network-online.target
 
+# StartLimit* belong in [Unit] — see the note in hermes-gateway@.service. This
+# unit is the one that actually demonstrated the cost: ReadWritePaths names
+# /home/JackrabbitDLM/{Logs,Disk,Quarantine}, and a MISSING one makes systemd
+# fail mount-namespace setup before Python ever runs. With Restart=always and
+# an unbounded start limit, it then reported `activating (auto-restart)`
+# indefinitely instead of failing — the gateway gated behind it never started,
+# and the phone could not pair.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=%i
@@ -12,8 +22,6 @@ WorkingDirectory=/home/JackrabbitDLM
 ExecStart=/usr/bin/python3 /home/JackrabbitDLM/JackrabbitDLM 0.0.0.0 37373
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # Security hardening
 NoNewPrivileges=yes

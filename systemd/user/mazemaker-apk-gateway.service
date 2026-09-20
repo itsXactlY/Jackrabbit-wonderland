@@ -1,0 +1,40 @@
+[Unit]
+Description=Mazemaker APK secure gateway (hermes-crypto, hardened: token+TLS+AES+pod-proxy)
+Documentation=https://github.com/itsXactlY/hermes-crypto
+After=network-online.target
+Wants=network-online.target
+
+# StartLimit* belong in [Unit]. They were in [Service] in the deployed copy,
+# where systemd ignores them with "Unknown key 'StartLimitIntervalSec' in
+# section [Service]" — so the crash loop this unit is prone to (port already
+# held, missing cert, bad provider env) was never actually bounded, and a
+# broken gateway restarted forever instead of failing visibly.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/hermes-crypto
+# Token + TLS cert/key are read from ~/.hermes-crypto (provision-apk.sh).
+# Binds the LAN so the phone can reach it; proxies the local pod on :8765.
+#
+# The port is 8443, NOT the 8080 the /opt hermes-gateway@ service uses. Two
+# reasons it must be this one: the app builds its gateway URL as "https://host"
+# and is paired against :8443, and mDNS advertises MM_GATEWAY_PORT (8443). Run
+# the /opt service alongside this and it silently squats the port — it answers,
+# so the pod looks healthy while the correct service can never bind.
+Environment=HERMES_CRYPTO_REPO=%h/projects/hermes-crypto
+Environment=HERMES_CRYPTO_HOME=%h/.hermes-crypto
+Environment=MM_POD_URL=http://127.0.0.1:8765
+Environment=MM_GATEWAY_PORT=8443
+# Optional override for non-default checkouts; '-' keeps the unit startable
+# when absent. The provider env below is likewise optional: without it the
+# gateway still serves status/pod/bridge, only the LLM proxy loses upstream.
+EnvironmentFile=-%h/.hermes-crypto/apk-gateway.env
+EnvironmentFile=-%h/projects/hermes-crypto/container/gateway.env
+ExecStart=/usr/bin/python3 ${HERMES_CRYPTO_REPO}/lan_gateway.py --port 8443 --tcp-port 38374 --bind 0.0.0.0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

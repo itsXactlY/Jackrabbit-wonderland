@@ -1,0 +1,31 @@
+[Unit]
+Description=Mazemaker APK gateway mDNS advertisement (_mazemaker-gw._tcp)
+Documentation=https://github.com/itsXactlY/hermes-crypto
+After=mazemaker-apk-gateway.service avahi-daemon.service
+Wants=mazemaker-apk-gateway.service
+PartOf=mazemaker-apk-gateway.service
+
+# Without this unit the app CANNOT pair on a fresh install, and the failure is
+# opaque: provision-apk.sh emits a deliberately host-less pairing code
+# ({v,token,fp}), so the app has no address to dial and must find the gateway by
+# browsing _mazemaker-gw._tcp. With nothing advertising, the app reports "could
+# not find the gateway on this device" no matter how healthy the gateway is —
+# the gateway itself has no mDNS code and never advertises on its own.
+#
+# [Unit], not [Service] — see the note in mazemaker-apk-gateway.service.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=HERMES_CRYPTO_HOME=%h/.hermes-crypto
+# avahi-publish-service blocks until killed, deregistering on exit, so this is
+# a foreground Type=simple process by design. If avahi is absent the script
+# exits 1 and Restart=on-failure loops — hence the avahi check in
+# install-apk-gateway.sh, which fails loudly rather than letting it churn.
+ExecStart=%h/projects/hermes-crypto/mdns-advertise.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

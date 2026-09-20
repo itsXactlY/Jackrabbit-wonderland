@@ -4,6 +4,15 @@ Documentation=https://github.com/itsXactlY/hermes-crypto
 After=network-online.target jackrabbit-dlm@%i.service
 Wants=network-online.target
 
+# StartLimit* belong in [Unit]. In [Service] systemd logs
+#   "Unknown key 'StartLimitIntervalSec' in section [Service], ignoring"
+# so the crash loop this bounds was never actually bounded: Restart=always
+# restarts forever instead of failing visibly, and a gateway that cannot bind
+# its port keeps reporting "active". Observed at restart counter 5 on
+# alca-desk, 2026-09-20.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=%i
@@ -12,8 +21,6 @@ WorkingDirectory=/opt/hermes-crypto
 ExecStart=/usr/bin/python3 /opt/hermes-crypto/lan_gateway.py --port 8080 --tcp-port 37374
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # Security hardening
 NoNewPrivileges=yes
