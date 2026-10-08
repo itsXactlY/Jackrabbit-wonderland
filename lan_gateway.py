@@ -103,7 +103,7 @@ GATEWAY_TOKEN = _load_gateway_token()
 # health stay open for liveness checks and the Web UI.
 PROTECTED_COMMANDS = _env_csv(
     "GATEWAY_PROTECTED_COMMANDS",
-    "shell,hermes,pulse,pod,bridge,encrypt,decrypt,key,roundtrip,session,kill",
+    "shell,hermes,pulse,pod,bridge,llm,encrypt,decrypt,key,roundtrip,session,kill",
 )
 GATEWAY_TLS_CERT = os.path.expanduser(
     os.environ.get("GATEWAY_TLS_CERT", os.path.join(_HC_HOME, "gateway.crt"))
@@ -127,6 +127,22 @@ BRIDGE_BASE_URL = (
     os.environ.get("MM_BRIDGE_URL")
     or "http://127.0.0.1:8769"
 ).strip().rstrip("/")
+# The desktop's local model, for the agent running on the phone (`cmd:llm`).
+# Both servers that serve it here — daedalus' llama-server (stack.conf
+# MAIN_HOST/MAIN_PORT) and llama.cpp-strata's serve/server.py — listen on
+# 127.0.0.1:8080 and nowhere else, by design: an LLM server on the LAN is
+# plaintext and unauthenticated. The phone reached it at <desktop-ip>:8080
+# until 2026-10-08, which worked only on the days somebody had started a server
+# with --host 0.0.0.0. It comes through here instead: token + AES + TLS, and the
+# server stays on loopback. There is no fallback to a cloud provider on this
+# path — a model that is not running is reported as exactly that.
+LLM_BASE_URL = (
+    os.environ.get("MM_LLM_URL")
+    or "http://127.0.0.1:8080"
+).strip().rstrip("/")
+# A key the local server may require (llama-server --api-key). It stays on the
+# desktop; the phone never holds it.
+LLM_API_KEY = os.environ.get("MM_LLM_API_KEY", "").strip()
 # How long the gateway waits on a proxied pod/bridge call before giving up.
 # This is the gateway's authority — clients (the app) do NOT get to dictate it.
 # Must be >= the bridge's MM_HERMES_TIMEOUT_SEC so the bridge's own 504 wins
@@ -947,10 +963,12 @@ def pairing_page_html(code: str, fp: str, svg: str) -> str:
 # COMMAND EXECUTION
 # ================================================================
 
-def _proxy_http(base_url: str, label: str, args) -> dict:
+def _proxy_http(base_url: str, label: str, args, headers: dict = None,
+                path_prefix: str = "", down_message: str = "") -> dict:
     """Forward {method,path,body,timeout} (JSON in `args`) to base_url and return
-    its JSON. Shared by `cmd:pod` (Mazemaker pod) and `cmd:bridge` (hermes-bridge).
-    Path is appended to base_url — no absolute URLs, no traversal."""
+    its JSON. Shared by `cmd:pod` (Mazemaker pod), `cmd:bridge` (hermes-bridge)
+    and `cmd:llm` (the local model). Path is appended to base_url — no absolute
+    URLs, no traversal, and only under `path_prefix` when one is given."""
     try:
         spec = json.loads(args) if isinstance(args, str) and args.strip() else (args or {})
     except (json.JSONDecodeError, TypeError):
@@ -959,14 +977,14 @@ def _proxy_http(base_url: str, label: str, args) -> dict:
         return {"error": f"{label}: args must be a JSON object"}
     method = str(spec.get("method") or "GET").upper()
     path = str(spec.get("path") or "").lstrip("/")
-    if not path or "://" in path or ".." in path:
+    if not path or "://" in path or ".." in path or not path.startswith(path_prefix):
         return {"error": f"{label}: invalid path"}
     url = base_url + "/" + path
     body = spec.get("body")
     payload = json.dumps(body).encode("utf-8") if (body is not None and method == "POST") else None
     req = Request(
         url, data=payload, method=method,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={"Content-Type": "application/json", "Accept": "application/json", **(headers or {})},
     )
     # The proxy deadline is the gateway's config, NOT the caller's. Any
     # `timeout` field the client sends is ignored on purpose — the app is a
@@ -981,6 +999,8 @@ def _proxy_http(base_url: str, label: str, args) -> dict:
     except HTTPError as e:
         return {"error": f"{label} HTTP {e.code}", "detail": e.read().decode("utf-8", "replace")[:500]}
     except URLError as e:
+        if down_message:
+            return {"error": down_message, "code": f"{label}_down", "detail": str(e)[:200]}
         return {"error": f"{label} unreachable: {e}"}
 
 
@@ -1146,6 +1166,32 @@ def execute_command(cmd: str, args: str = "", encrypted: bool = False,
 
     elif cmd == "bridge":
         return _proxy_http(BRIDGE_BASE_URL, "bridge", args)
+
+    elif cmd == "llm":
+        # Request/response only: a streamed completion cannot ride one command
+        # envelope, so the stream is asked for here as a whole answer and the
+        # phone hands it to its agent as a stream again (LocalPodMcpProxy).
+        spec = args
+        try:
+            spec = json.loads(args) if isinstance(args, str) and args.strip() else (args or {})
+            if isinstance(spec, dict) and isinstance(spec.get("body"), dict):
+                spec["body"]["stream"] = False
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Plaintext to a model is only acceptable on this machine. Anything else
+        # is an upstream provider, and those only ever get remember-encoded
+        # traffic through remember_openai_messages() — never this path.
+        from urllib.parse import urlparse
+        if (urlparse(LLM_BASE_URL).hostname or "") not in ("127.0.0.1", "localhost", "::1"):
+            return {"error": "llm: MM_LLM_URL must be a model on this machine (loopback); "
+                             f"{LLM_BASE_URL} is not", "code": "llm_not_local"}
+        where = LLM_BASE_URL.split("://", 1)[-1]
+        return _proxy_http(
+            LLM_BASE_URL, "llm", spec,
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else None,
+            path_prefix="v1/",
+            down_message=f"the local model on the desktop is not running — nothing answers on {where}",
+        )
 
     elif cmd == "chaff":
         session = sessions.get_session(session_id)
