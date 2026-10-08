@@ -197,18 +197,45 @@ sudo cp "$SCRIPT_DIR/systemd/hermes-gateway@.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 ok "Systemd services installed"
 
+# One DLM per machine. Iris carries its own (iris-messenger: "gateway + DLM
+# relay + UI + tor") on the same port, 37373, and the gateway talks to it like
+# to this one. Starting a second one there cannot work: on 2026-10-08 the
+# desktop and the ThinkPad each had jackrabbit-dlm@ in a restart loop — 29 088
+# and 178 308 restarts — while Iris served the port the whole time.
+dlm_answers() {
+    python3 -c "import sys; sys.path.insert(0,'$DLM_DIR'); from DLMLocker import Locker; \
+Locker('hc',Host='127.0.0.1',Port=$DLM_PORT,ID='probe').Version()" >/dev/null 2>&1
+}
+USE_OWN_DLM=1
+if dlm_answers && ! systemctl is-active --quiet jackrabbit-dlm@"$SERVICE_USER"; then
+    USE_OWN_DLM=0
+    ok "A DLM already answers on :$DLM_PORT (Iris brings one) — using it, not starting a second"
+    sudo systemctl disable --now jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null || true
+else
+    # The DLM writes Logs/, Disk/ and Quarantine/ under its own directory, as $SERVICE_USER.
+    # A checkout cloned earlier as root left that directory unwritable, and
+    # the service died on PermissionError every five seconds.
+    for d in Logs Disk Quarantine; do   # the unit's ReadWritePaths
+        sudo install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$DLM_DIR/$d"
+    done
+fi
+
 # Enable services
-sudo systemctl enable jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "DLM enabled on boot" || warn "Could not enable DLM"
+if [ "$USE_OWN_DLM" = 1 ]; then
+    sudo systemctl enable jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "DLM enabled on boot" || warn "Could not enable DLM"
+fi
 sudo systemctl enable hermes-gateway@"$SERVICE_USER" 2>/dev/null && ok "Gateway enabled on boot" || warn "Could not enable gateway"
 
 # 6. Start services
 info "Starting services..."
 
 # Kill existing processes if running
-pkill -f "python3.*JackrabbitDLM.*37373" 2>/dev/null && sleep 1 || true
+[ "$USE_OWN_DLM" = 1 ] && { pkill -f "python3.*JackrabbitDLM.*37373" 2>/dev/null && sleep 1 || true; }
 pkill -f "python3.*lan_gateway.py" 2>/dev/null && sleep 1 || true
 
-sudo systemctl start jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "DLM started" || warn "DLM may already be running"
+if [ "$USE_OWN_DLM" = 1 ]; then
+    sudo systemctl start jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "DLM started" || warn "DLM may already be running"
+fi
 sleep 2
 sudo systemctl start hermes-gateway@"$SERVICE_USER" 2>/dev/null && ok "Gateway started" || warn "Gateway may already be running"
 
