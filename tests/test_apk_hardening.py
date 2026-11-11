@@ -3,7 +3,7 @@
 APK LAN-hardening regression tests.
 
 Covers the phone<->gateway security layer added for the Mazemaker mobile app:
-  - bearer-token auth gates protected commands (shell/hermes/... = no RCE)
+  - bearer-token auth gates protected commands (shell/ariadne/... = no RCE)
   - open commands (status) stay reachable for liveness/UI
   - client-key handshake: an authenticated `session` returns the AES key
   - encrypted (`enc`) round-trip both directions, with decrypt-as-auth

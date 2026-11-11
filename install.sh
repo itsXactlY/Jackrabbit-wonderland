@@ -1,12 +1,12 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-#  HERMES-CRYPTO — Zero-Knowledge AES256 Layer for Hermes Agent
+#  MAZEMAKER-GATEWAY — Zero-Knowledge AES256 Layer for the Mazemaker stack
 #  All-in-one installer
 # ═══════════════════════════════════════════════════════════════
 #
 #  Installs:
 #    1. JackrabbitDLM (if not present) — volatile key vault
-#    2. Hermes Crypto middleware — AES256-GCM encrypt/decrypt
+#    2. Gateway crypto middleware — AES256-GCM encrypt/decrypt
 #    3. LAN Gateway — HTTP + raw TCP control interface
 #    4. Systemd services — auto-start on boot
 #    5. nftables rules — LAN-only access
@@ -26,7 +26,7 @@ set -euo pipefail
 
 # ─── Config ───────────────────────────────────────────────────
 
-INSTALL_DIR="/opt/hermes-crypto"
+INSTALL_DIR="/opt/mazemaker-gateway"
 DLM_DIR="/home/JackrabbitDLM"
 DLM_REPO="https://github.com/rapmd73/JackrabbitDLM.git"
 GATEWAY_PORT=8080
@@ -69,24 +69,24 @@ done
 
 echo ""
 echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}║  HERMES-CRYPTO — Zero-Knowledge AES256       ║${NC}"
-echo -e "${BOLD}${CYAN}║  JackrabbitDLM + LAN Gateway + Hermes        ║${NC}"
+echo -e "${BOLD}${CYAN}║  MAZEMAKER-GATEWAY — Zero-Knowledge AES256       ║${NC}"
+echo -e "${BOLD}${CYAN}║  JackrabbitDLM + LAN Gateway + Ariadne       ║${NC}"
 echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
 # ─── Uninstall ────────────────────────────────────────────────
 
 if [ "$MODE" = "uninstall" ]; then
-    echo -e "${BOLD}Uninstalling hermes-crypto...${NC}"
+    echo -e "${BOLD}Uninstalling mazemaker-gateway...${NC}"
     
     # Stop services
-    sudo systemctl stop hermes-gateway@"$SERVICE_USER" 2>/dev/null && ok "Stopped gateway" || true
-    sudo systemctl disable hermes-gateway@"$SERVICE_USER" 2>/dev/null && ok "Disabled gateway" || true
+    sudo systemctl stop mazemaker-gateway@"$SERVICE_USER" 2>/dev/null && ok "Stopped gateway" || true
+    sudo systemctl disable mazemaker-gateway@"$SERVICE_USER" 2>/dev/null && ok "Disabled gateway" || true
     sudo systemctl stop jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "Stopped DLM" || true
     sudo systemctl disable jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "Disabled DLM" || true
     
     # Remove service files
-    sudo rm -f /etc/systemd/system/hermes-gateway@"$SERVICE_USER".service
+    sudo rm -f /etc/systemd/system/mazemaker-gateway@"$SERVICE_USER".service
     sudo rm -f /etc/systemd/system/jackrabbit-dlm@"$SERVICE_USER".service
     sudo systemctl daemon-reload
     ok "Removed systemd services"
@@ -99,7 +99,7 @@ if [ "$MODE" = "uninstall" ]; then
     
     # Remove nftables rules
     if [ -f /etc/nftables.conf ]; then
-        sudo sed -i '/# Hermes Crypto Gateway/,/accept$/d' /etc/nftables.conf 2>/dev/null && ok "Removed nftables rules" || true
+        sudo sed -i '/# Mazemaker Gateway/,/accept$/d' /etc/nftables.conf 2>/dev/null && ok "Removed nftables rules" || true
     fi
     
     echo ""
@@ -131,12 +131,12 @@ check "pip available"              "python3 -m pip --version"
 check "pycryptodome installed"     "python3 -c 'from Crypto.Cipher import AES'"
 check "JackrabbitDLM exists"       "test -f $DLM_DIR/JackrabbitDLM"
 check "DLMLocker.py exists"        "test -f $DLM_DIR/DLMLocker.py"
-check "hermes-crypto files exist"  "test -f $INSTALL_DIR/crypto_middleware.py"
-check "Gateway service installed"  "test -f /etc/systemd/system/hermes-gateway@${SERVICE_USER}.service"
+check "mazemaker-gateway files exist"  "test -f $INSTALL_DIR/crypto_middleware.py"
+check "Gateway service installed"  "test -f /etc/systemd/system/mazemaker-gateway@${SERVICE_USER}.service"
 check "DLM service installed"      "test -f /etc/systemd/system/jackrabbit-dlm@${SERVICE_USER}.service"
 check "Gateway running"            "curl -sf http://127.0.0.1:$GATEWAY_PORT/status"
 check "DLM running"                "python3 -c \"import sys; sys.path.insert(0,'$DLM_DIR'); from DLMLocker import Locker; l=Locker('hc',Host='127.0.0.1',Port=$DLM_PORT,ID='test'); l.Version()\""
-check "nftables rules present"     "grep -q 'Hermes Crypto' /etc/nftables.conf"
+check "nftables rules present"     "grep -q 'Mazemaker Gateway' /etc/nftables.conf"
 
 echo ""
 echo -e "  ${BOLD}$CHECKS_PASSED/$CHECKS_TOTAL checks passed${NC}"
@@ -183,7 +183,6 @@ sudo mkdir -p "$INSTALL_DIR"
 sudo cp -v crypto_middleware.py "$INSTALL_DIR/"
 sudo cp -v remember_protocol.py "$INSTALL_DIR/"
 sudo cp -v dlm_vault.py "$INSTALL_DIR/"
-sudo cp -v crypto_plugin.py "$INSTALL_DIR/"
 sudo cp -v lan_gateway.py "$INSTALL_DIR/"
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 ok "Files copied to $INSTALL_DIR"
@@ -193,7 +192,7 @@ info "Installing systemd services..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 sudo cp "$SCRIPT_DIR/systemd/jackrabbit-dlm@.service" /etc/systemd/system/
-sudo cp "$SCRIPT_DIR/systemd/hermes-gateway@.service" /etc/systemd/system/
+sudo cp "$SCRIPT_DIR/systemd/mazemaker-gateway@.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 ok "Systemd services installed"
 
@@ -224,7 +223,7 @@ fi
 if [ "$USE_OWN_DLM" = 1 ]; then
     sudo systemctl enable jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "DLM enabled on boot" || warn "Could not enable DLM"
 fi
-sudo systemctl enable hermes-gateway@"$SERVICE_USER" 2>/dev/null && ok "Gateway enabled on boot" || warn "Could not enable gateway"
+sudo systemctl enable mazemaker-gateway@"$SERVICE_USER" 2>/dev/null && ok "Gateway enabled on boot" || warn "Could not enable gateway"
 
 # 6. Start services
 info "Starting services..."
@@ -237,17 +236,17 @@ if [ "$USE_OWN_DLM" = 1 ]; then
     sudo systemctl start jackrabbit-dlm@"$SERVICE_USER" 2>/dev/null && ok "DLM started" || warn "DLM may already be running"
 fi
 sleep 2
-sudo systemctl start hermes-gateway@"$SERVICE_USER" 2>/dev/null && ok "Gateway started" || warn "Gateway may already be running"
+sudo systemctl start mazemaker-gateway@"$SERVICE_USER" 2>/dev/null && ok "Gateway started" || warn "Gateway may already be running"
 
 # 7. nftables
 if [ "$SKIP_FIREWALL" = false ]; then
     info "Configuring firewall..."
     if [ -f /etc/nftables.conf ]; then
-        if grep -q "Hermes Crypto" /etc/nftables.conf; then
+        if grep -q "Mazemaker Gateway" /etc/nftables.conf; then
             ok "nftables rules already present"
         else
             # Add after Ollama rule
-            sudo sed -i '/tcp dport 11434 accept/a\\n        # Hermes Crypto Gateway - LAN only\n        # JackrabbitDLM :37373, HTTP gateway :8080, Raw TCP :37374\n        ip saddr 192.168.0.0\/24 tcp dport { 8080, 37373, 37374 } accept' /etc/nftables.conf
+            sudo sed -i '/tcp dport 11434 accept/a\\n        # Mazemaker Gateway - LAN only\n        # JackrabbitDLM :37373, HTTP gateway :8080, Raw TCP :37374\n        ip saddr 192.168.0.0\/24 tcp dport { 8080, 37373, 37374 } accept' /etc/nftables.conf
             sudo nft -f /etc/nftables.conf 2>/dev/null && ok "nftables rules applied" || warn "nftables reload failed (manual: sudo nft -f /etc/nftables.conf)"
         fi
     else
@@ -265,7 +264,7 @@ echo ""
 sleep 2
 
 check "DLM running"     "systemctl is-active jackrabbit-dlm@$SERVICE_USER"
-check "Gateway running"  "systemctl is-active hermes-gateway@$SERVICE_USER"
+check "Gateway running"  "systemctl is-active mazemaker-gateway@$SERVICE_USER"
 check "HTTP responds"    "curl -sf http://127.0.0.1:$GATEWAY_PORT/status"
 check "TCP responds"     "echo '{\"cmd\":\"chaff\"}' | nc -w 2 127.0.0.1 $RAW_TCP_PORT"
 check "Crypto works"     "cd $INSTALL_DIR && python3 crypto_middleware.py demo"
@@ -277,20 +276,20 @@ echo -e "${BOLD}${GREEN}╚═════════════════�
 echo ""
 echo -e "  ${BOLD}Services:${NC}"
 echo -e "    DLM:     systemctl status jackrabbit-dlm@$SERVICE_USER"
-echo -e "    Gateway: systemctl status hermes-gateway@$SERVICE_USER"
+echo -e "    Gateway: systemctl status mazemaker-gateway@$SERVICE_USER"
 echo ""
 echo -e "  ${BOLD}Access:${NC}"
 echo -e "    Browser: http://$(hostname -I | awk '{print $1}'):$GATEWAY_PORT"
 echo -e "    curl:    curl -X POST http://127.0.0.1:$GATEWAY_PORT/command -d '{\"cmd\":\"status\"}'"
 echo -e "    netcat:  echo '{\"cmd\":\"chaff\"}' | nc 127.0.0.1 $RAW_TCP_PORT"
 echo ""
-echo -e "  ${BOLD}Hermes integration:${NC}"
-echo -e "    cp $INSTALL_DIR/crypto_plugin.py ~/.hermes/plugins/"
-echo -e "    (or symlink it)"
+echo -e "  ${BOLD}Ariadne:${NC}"
+echo -e "    cmd:ariadne runs ariadne-agent (ARIADNE_BIN) from ARIADNE_HOME (default ~/ariadne)"
+echo -e "    container/configure-ariadne.py points its model at Wonderland"
 echo ""
 echo -e "  ${BOLD}Logs:${NC}"
 echo -e "    journalctl -u jackrabbit-dlm@$SERVICE_USER -f"
-echo -e "    journalctl -u hermes-gateway@$SERVICE_USER -f"
+echo -e "    journalctl -u mazemaker-gateway@$SERVICE_USER -f"
 echo ""
 echo -e "  ${BOLD}Uninstall:${NC}"
 echo -e "    bash install.sh --uninstall"

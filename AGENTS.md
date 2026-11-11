@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is a standalone Python 3 encryption layer for Hermes Agent. Core modules live at the repository root: `crypto_middleware.py` handles AES256-GCM operations, `dlm_vault.py` bridges to JackrabbitDLM, `crypto_plugin.py` integrates with Hermes, `lan_gateway.py` exposes HTTP/TCP controls, and `remember_protocol.py` implements the remember transport. Tests are in `tests/` and mirror these components. Production documentation is in `docs/`, with deployment units in `systemd/`. Use `README.md`, `SPEC.md`, and `USECASES.md` for product context before changing behavior.
+This repository is a standalone Python 3 encryption layer for the Mazemaker stack and its agent, Ariadne. Core modules live at the repository root: `crypto_middleware.py` handles AES256-GCM operations, `dlm_vault.py` bridges to JackrabbitDLM, `lan_gateway.py` exposes HTTP/TCP controls, and `remember_protocol.py` implements the remember transport. Tests are in `tests/` and mirror these components. Production documentation is in `docs/`, with deployment units in `systemd/`. Use `README.md`, `SPEC.md`, and `USECASES.md` for product context before changing behavior.
 
 ## Build, Test, and Development Commands
 
@@ -10,7 +10,6 @@ This repository is a standalone Python 3 encryption layer for Hermes Agent. Core
 - `python3 tests/run_all.py crypto`: run middleware encryption tests.
 - `python3 tests/run_all.py gateway`: run LAN gateway stress tests.
 - `python3 tests/run_all.py dlm`: run DLM vault tests.
-- `python3 tests/run_all.py plugin`: run Hermes plugin tests.
 - `bash install.sh --check`: verify local service, dependency, firewall, and gateway setup.
 - `sudo bash install.sh`: install pycryptodome, JackrabbitDLM, systemd units, and LAN firewall rules.
 

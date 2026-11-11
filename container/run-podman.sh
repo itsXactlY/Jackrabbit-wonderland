@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE="${HERMES_CRYPTO_IMAGE:-localhost/hermes-crypto:wonderland}"
+IMAGE="${MAZEMAKER_GATEWAY_IMAGE:-localhost/mazemaker-gateway:wonderland}"
 POD="${WONDERLAND_POD:-wonderland}"
 BIND="${WONDERLAND_BIND:-127.0.0.1}"
 GATEWAY_PORT="${WONDERLAND_GATEWAY_PORT:-18080}"
@@ -12,10 +12,10 @@ GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-$ROOT_DIR/container/gateway.env}"
 
 usage() {
     cat <<USAGE
-Usage: container/run-podman.sh [build|start|restart|stop|status|logs|print-env|configure-hermes]
+Usage: container/run-podman.sh [build|start|restart|stop|status|logs|print-env|configure-ariadne]
 
 Environment:
-  HERMES_CRYPTO_IMAGE   $IMAGE
+  MAZEMAKER_GATEWAY_IMAGE   $IMAGE
   WONDERLAND_POD        $POD
   WONDERLAND_BIND       $BIND
   WONDERLAND_GATEWAY_PORT $GATEWAY_PORT
@@ -105,8 +105,8 @@ case "${1:-start}" in
     print-env)
         cat "$ROOT_DIR/container/wonderland.env"
         ;;
-    configure-hermes)
-        "$ROOT_DIR/container/configure-hermes.py"
+    configure-ariadne)
+        "$ROOT_DIR/container/configure-ariadne.py"
         ;;
     help|-h|--help)
         usage

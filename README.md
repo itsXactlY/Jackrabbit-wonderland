@@ -1,6 +1,6 @@
-# Hermes-Jackrabbit-wonderland-crypto-layer
+# mazemaker-gateway (Jackrabbit-wonderland)
 
-> Zero-knowledge AES256 encryption for [Hermes Agent](https://github.com/NousResearch/hermes-agent).
+> Zero-knowledge AES256 encryption for the Mazemaker stack and its agent, [Ariadne](https://github.com/itsXactlY/ariadne).
 > Your data stays yours. The provider sees noise.
 
 ## Documentation
@@ -15,7 +15,7 @@ Full production documentation in [`docs/`](docs/):
 | [Deployment](docs/deployment.md) | Install, systemd, firewall, verification |
 | [Configuration](docs/configuration.md) | All config options and environment variables |
 | [Security Model](docs/security.md) | Threat model, attack surface, limitations |
-| [Integration](docs/integration.md) | Hermes plugin, PULSE, Neural Memory, iOS, Tasker |
+| [Integration](docs/integration.md) | Ariadne, PULSE, Neural Memory, iOS, Tasker |
 | [Gateway](docs/gateway.md) | HTTP/TCP API, Web UI, device access |
 | [Troubleshooting](docs/troubleshooting.md) | 12 common issues with solutions |
 | [Use Cases](USECASES.md) | 10 primary + 32 application areas |
@@ -25,8 +25,8 @@ Full production documentation in [`docs/`](docs/):
 ### Podman
 
 ```bash
-git clone https://github.com/itsXactlY/hermes-crypto.git
-cd hermes-crypto
+git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
+cd mazemaker-gateway
 
 # Build once, then run the DLM + gateway pod.
 container/run-podman.sh build
@@ -37,14 +37,14 @@ set -a
 . "$PWD/container/wonderland.env"
 set +a
 
-# Make the host Hermes CLI use the same Wonderland gateway by default.
-container/run-podman.sh configure-hermes
+# Point Ariadne (~/ariadne/config.yaml) at the same Wonderland gateway.
+container/run-podman.sh configure-ariadne
 ```
 
 The Podman gateway exposes `http://127.0.0.1:18080/v1` and the local model alias
 `wonderland`. Keep `container/wonderland.env` as the single source of truth for
-projects that should use this gateway. Hermes Agent is configured from that same
-file through `container/run-podman.sh configure-hermes`.
+projects that should use this gateway. Ariadne is configured from that same
+file through `container/run-podman.sh configure-ariadne`.
 
 When Wonderland calls a real LLM endpoint, it uses the Remember Protocol only:
 `remember::<base64>` payloads plus the Remember Protocol system header. AES
@@ -53,8 +53,8 @@ headers, AES ciphertext, and AES key material are never sent upstream.
 ### Native systemd
 
 ```bash
-git clone https://github.com/itsXactlY/hermes-crypto.git
-cd hermes-crypto
+git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
+cd mazemaker-gateway
 sudo bash install.sh
 ```
 
@@ -136,13 +136,12 @@ not the transport.
 
 ## What This Is
 
-A four-component encryption layer for Hermes Agent:
+A three-component encryption layer for the Mazemaker stack:
 
 | Component | Role |
 |-----------|------|
 | **JackrabbitDLM** | Volatile key vault — keys in memory only, TTL-bound, auto-destroy on crash |
 | **crypto_middleware** | AES256-GCM encrypt/decrypt, key rotation, chaff injection |
-| **crypto_plugin** | Hermes-agent plugin — injects crypto header into system prompt |
 | **lan_gateway** | HTTP + raw TCP server — control from any LAN device (browser, curl, netcat, iOS Shortcuts) |
 
 ## The Foundation: JackrabbitDLM
@@ -208,7 +207,7 @@ Robert designed JackrabbitDLM as infrastructure glue — something that sits bet
 
 He deliberately made the wire format "deliberately unstable" — not to be secure, but to force proper parsing. He added the encoder/decoder injection point because he knew: *the server shouldn't decide what security means. The client should.*
 
-That philosophy is why hermes-crypto exists. The DLM doesn't know it's holding AES256 keys. It doesn't care. It's a volatile key-value store with ownership and TTL. We just told it the keys are strings and the values are base64. It treats them like any other data.
+That philosophy is why mazemaker-gateway exists. The DLM doesn't know it's holding AES256 keys. It doesn't care. It's a volatile key-value store with ownership and TTL. We just told it the keys are strings and the values are base64. It treats them like any other data.
 
 **The Blind Vault doesn't see what's inside. It just holds the door shut.**
 
@@ -228,11 +227,10 @@ JackrabbitDLM (Robert's foundation)
 Everything in this repo — the middleware, the plugin, the gateway, the installer — is possible because Robert left the door open. The `Encoder`/`Decoder` parameters in `DLMLocker.__init__()` are the single integration point that makes the entire crypto layer work.
 
 ```
-hermes-crypto adds:
+mazemaker-gateway adds:
     │
     ├── crypto_middleware.py    →  AES256-GCM (the "real security" Robert invited)
     ├── dlm_vault.py            →  Bridge to DLM via DLMLocker with consistent identity
-    ├── crypto_plugin.py        →  Hermes system prompt injection
     ├── lan_gateway.py          →  HTTP + TCP control interface
     └── install.sh              →  One-command deployment
 ```
@@ -248,7 +246,7 @@ hermes-crypto adds:
 └──────────────┘              ┌───────┴────────┐
                               │                │
                        ┌──────▼──────┐  ┌──────▼──────┐
-                       │ Jackrabbit  │  │   Hermes    │
+                       │ Jackrabbit  │  │   Ariadne   │
                        │ DLM         │  │   Agent     │
                        │ :37373      │  │             │
                        │             │  │ ┌─────────┐ │
@@ -301,35 +299,35 @@ For projects that should use Wonderland:
 
 ```bash
 set -a
-. /home/alca/projects/hermes-crypto/container/wonderland.env
+. /home/alca/projects/mazemaker-stack/gateway/container/wonderland.env
 set +a
 ```
 
 This exports `OPENAI_BASE_URL=http://127.0.0.1:18080/v1` and
 `OPENAI_MODEL=wonderland` for any OpenAI-compatible client.
 
-For the host Hermes CLI, sync the named custom provider and default model from
-the same file:
+For Ariadne, sync its `model:` block (base_url, name, api_key) from the same
+file:
 
 ```bash
-container/run-podman.sh configure-hermes
+container/run-podman.sh configure-ariadne
 ```
 
 The Podman image is Wonderland-only: JackrabbitDLM plus the gateway/encryption
-proxy. It does not install or run a second `hermes-agent` inside the pod.
+proxy. It does not install or run an agent inside the pod.
 
 ### Native systemd
 
 ```bash
-git clone https://github.com/itsXactlY/hermes-crypto.git
-cd hermes-crypto
+git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
+cd mazemaker-gateway
 sudo bash install.sh
 ```
 
 **What the installer does:**
 1. Checks for existing JackrabbitDLM (clones if missing)
 2. Installs `pycryptodome` (only pip dependency)
-3. Copies files to `/opt/hermes-crypto/`
+3. Copies files to `/opt/mazemaker-gateway/`
 4. Installs systemd services (auto-start on boot)
 5. Adds nftables rules (LAN-only access)
 6. Starts both services
@@ -361,7 +359,7 @@ echo '{"cmd":"chaff"}' | nc 192.168.0.2 37374
 
 # iOS Shortcuts
 HTTP POST to http://192.168.0.2:8080/command
-Body: {"cmd":"hermes","args":"ask what is 2+2"}
+Body: {"cmd":"ariadne","args":"what is 2+2"}
 ```
 
 ### Gateway Commands
@@ -372,7 +370,7 @@ Body: {"cmd":"hermes","args":"ask what is 2+2"}
 | `sessions` | — | List active sessions |
 | `session` | — | Create new encrypted session |
 | `kill` | session_id | Destroy a session |
-| `hermes` | command | Run hermes CLI (e.g. `"ask what is 2+2"`) |
+| `ariadne` | message | Run one Ariadne agent turn (e.g. `"what is 2+2"`); reply has `final` |
 | `pulse` | topic | Run PULSE research |
 | `shell` | command | Run shell command (LAN only, some blocked) |
 | `encrypt` | text | Encrypt a message |
@@ -380,62 +378,30 @@ Body: {"cmd":"hermes","args":"ask what is 2+2"}
 | `chaff` | — | Generate cover traffic message |
 | `key` | — | Rotate session key |
 
-## Hermes Integration
-
-### Option A: Wonderland Provider (recommended)
+## Ariadne Integration
 
 ```bash
-container/run-podman.sh configure-hermes
+container/run-podman.sh configure-ariadne   # model: block of ~/ariadne/config.yaml -> Wonderland
 ```
 
-Hermes uses the OpenAI-compatible Wonderland gateway. Real LLM endpoints receive
-Remember Protocol payloads only.
-
-### Option B: Legacy Direct Plugin
-
-```bash
-cp /opt/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/
-```
-
-The plugin automatically:
-- Generates a session key on new sessions
-- Injects the crypto header into the system prompt for direct-plugin mode
-- Encrypts tool results before they enter context
-- Encrypts Neural Memory entries at rest
-
-Do not use the legacy direct plugin as the upstream transport for Wonderland.
-
-### Option C: Manual Local Crypto
-
-```python
-import sys
-sys.path.insert(0, "/opt/hermes-crypto")
-from crypto_middleware import CryptoMiddleware
-
-cm = CryptoMiddleware()
-header = cm.session_start()  # Add this to your system prompt
-
-# Encrypt before sending
-blob, chaff = cm.encrypt_outbound("my secret query")
-
-# Decrypt after receiving
-plaintext = cm.decrypt(response_blob)
-```
+Ariadne then talks to the OpenAI-compatible Wonderland gateway, so real LLM endpoints
+receive Remember Protocol payloads only. `cmd:ariadne` on the gateway runs one agent turn
+(`ariadne-agent --home $ARIADNE_HOME -- <message>`) for LAN clients.
 
 ## Services
 
 ```bash
 # Status
 systemctl status jackrabbit-dlm@$USER
-systemctl status hermes-gateway@$USER
+systemctl status mazemaker-gateway@$USER
 
 # Logs
 journalctl -u jackrabbit-dlm@$USER -f
-journalctl -u hermes-gateway@$USER -f
+journalctl -u mazemaker-gateway@$USER -f
 
 # Restart
 sudo systemctl restart jackrabbit-dlm@$USER
-sudo systemctl restart hermes-gateway@$USER
+sudo systemctl restart mazemaker-gateway@$USER
 ```
 
 ## nftables
@@ -443,7 +409,7 @@ sudo systemctl restart hermes-gateway@$USER
 The installer adds these rules (LAN-only):
 
 ```nft
-# Hermes Crypto Gateway - LAN only
+# Mazemaker Gateway - LAN only
 # JackrabbitDLM :37373, HTTP gateway :8080, Raw TCP :37374
 ip saddr 192.168.0.0/24 tcp dport { 8080, 37373, 37374 } accept
 ```

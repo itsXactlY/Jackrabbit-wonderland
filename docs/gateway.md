@@ -46,7 +46,7 @@ Main command interface.
 **Request:**
 ```json
 {
-    "cmd": "hermes",
+    "cmd": "ariadne",
     "args": "ask what is 2+2",
     "session_id": "abc123def4",
     "encrypted": false
@@ -89,13 +89,13 @@ Destroy a session.
 {"cmd":"kill","args":"abc123def4"}
 ```
 
-### hermes
+### ariadne
 
-Run hermes CLI command.
+Run one Ariadne agent turn: `ariadne-agent --home $ARIADNE_HOME -- <args>`. The reply carries `final` (the answer), `stdout`, `stderr`, `exit_code`.
 
 ```bash
 curl -X POST http://192.168.0.2:8080/command \
-  -d '{"cmd":"hermes","args":"ask what is 2+2"}'
+  -d '{"cmd":"ariadne","args":"what is 2+2"}'
 ```
 
 ### pulse
@@ -181,7 +181,7 @@ Response is always JSON + newline.
 - **New Session** — Create encrypted session
 - **Chaff** — Generate cover traffic
 - **PULSE** — Prompt for topic, run search
-- **Hermes** — Prompt for command, run hermes
+- **Ariadne** — Prompt for a question, run one agent turn
 
 ### Command Selector
 

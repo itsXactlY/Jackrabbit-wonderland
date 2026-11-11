@@ -5,7 +5,7 @@
 # alca-desk 2026-09-20, performed by hand after the app failed to connect, and
 # every one of them is a way a customer pod silently ends up un-pairable:
 #
-#   1. the /opt hermes-gateway@ service was RUNNING and holding :8443. It is a
+#   1. the /opt mazemaker-gateway@ service was RUNNING and holding :8443. It is a
 #      pre-TLS build — no --tls-* flags, no /pair, no token auth — so it answers
 #      /status while being the wrong process. Anything that binds :8443 after it
 #      dies with "Address already in use", and the pod looks healthy throughout.
@@ -40,7 +40,7 @@ for a in "$@"; do
 done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HC="${HERMES_CRYPTO_HOME:-$HOME/.hermes-crypto}"
+HC="${MAZEMAKER_GATEWAY_HOME:-$HOME/.mazemaker-gateway}"
 UD="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 PORT="${MM_GATEWAY_PORT:-8443}"
 DLM_DIR="${JACKRABBITDLM_HOME:-/home/JackrabbitDLM}"
@@ -53,7 +53,7 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\n\033[31mABORT:\033[0m %s\n' "$*" >&2; exit 1; }
 run()  { if [[ $DRY == 1 ]]; then printf '  [dry-run] %s\n' "$*"; else "$@"; fi; }
 
-[[ -f "$REPO/lan_gateway.py" ]] || die "lan_gateway.py not found in $REPO — run from the hermes-crypto checkout"
+[[ -f "$REPO/lan_gateway.py" ]] || die "lan_gateway.py not found in $REPO — run from the mazemaker-gateway checkout"
 [[ -d "$REPO/systemd/user" ]]   || die "missing $REPO/systemd/user/ — this checkout predates the versioned units"
 
 step "Preconditions"
@@ -70,15 +70,15 @@ fi
 command -v qrencode >/dev/null || warn "qrencode missing — no QR will be rendered (the code still prints)"
 
 step "Retire the stale /opt service (it squats :$PORT and looks healthy)"
-# hermes-gateway@ is the OLD /opt deployment: pre-TLS, no /pair, no token auth.
+# mazemaker-gateway@ is the OLD /opt deployment: pre-TLS, no /pair, no token auth.
 # It must not hold the port the app is paired against. Only touched when it is
 # actually installed — this is not the same unit as the APK gateway.
-if systemctl list-unit-files "hermes-gateway@${SVC_USER}.service" >/dev/null 2>&1 \
-   && systemctl is-active --quiet "hermes-gateway@${SVC_USER}.service" 2>/dev/null; then
-  run sudo systemctl disable --now "hermes-gateway@${SVC_USER}.service"
-  ok "stopped + disabled hermes-gateway@${SVC_USER} (the /opt pre-TLS build)"
+if systemctl list-unit-files "mazemaker-gateway@${SVC_USER}.service" >/dev/null 2>&1 \
+   && systemctl is-active --quiet "mazemaker-gateway@${SVC_USER}.service" 2>/dev/null; then
+  run sudo systemctl disable --now "mazemaker-gateway@${SVC_USER}.service"
+  ok "stopped + disabled mazemaker-gateway@${SVC_USER} (the /opt pre-TLS build)"
 else
-  ok "hermes-gateway@${SVC_USER} not active — nothing squatting :$PORT"
+  ok "mazemaker-gateway@${SVC_USER} not active — nothing squatting :$PORT"
 fi
 
 step "DLM read-write paths (a missing one kills the unit at NAMESPACE)"

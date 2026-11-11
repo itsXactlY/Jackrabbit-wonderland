@@ -24,7 +24,7 @@
 
 **Problem:** OpenAI, Anthropic, Google — every LLM provider logs your queries. Your house search, your trading strategy, your medical questions — all visible to provider employees, auditors, and potentially data-mined for training.
 
-**Solution:** hermes-crypto encrypts every query before it leaves your machine. Provider sees base64 blobs. Chaff messages add noise. Nobody reviews millions of base64 logs.
+**Solution:** mazemaker-gateway encrypts every query before it leaves your machine. Provider sees base64 blobs. Chaff messages add noise. Nobody reviews millions of base64 logs.
 
 ```
 You: "¿Cuántos idiomas se hablan en Camerún?"
@@ -44,7 +44,7 @@ Provider sees: "remember:: wqfDp8+CxINow6nCgcOaw4jDncKQwrfCqQ=="
 ```bash
 # From your phone (iOS Shortcut)
 HTTP POST → http://192.168.0.2:8080/command
-Body: {"cmd":"hermes","args":"what did I research yesterday about quantum computing?"}
+Body: {"cmd":"ariadne","args":"what did I research yesterday about quantum computing?"}
 
 # From terminal
 echo '{"cmd":"pulse","args":"AI regulation 2026"}' | nc 192.168.0.2 37374
@@ -58,7 +58,7 @@ echo '{"cmd":"pulse","args":"AI regulation 2026"}' | nc 192.168.0.2 37374
 
 **Problem:** If a provider logs "User researching NVIDIA options strategy for Q2 2026 earnings," that's material non-public information in aggregate. Even without intent, your trading research becomes a data point.
 
-**Solution:** PULSE + hermes-crypto. Research prediction markets, analyze stocks, plan trades — all encrypted. Provider sees chaff about sourdough starters and keyboard recommendations.
+**Solution:** PULSE + mazemaker-gateway. Research prediction markets, analyze stocks, plan trades — all encrypted. Provider sees chaff about sourdough starters and keyboard recommendations.
 
 ```
 Actual: "Run PULSE on NVIDIA earnings prediction, check Polymarket odds, cross-reference with Reddit sentiment"
@@ -155,13 +155,13 @@ Gateway: sees base64 blobs only
 **Solution:** LAN Gateway + iOS Shortcuts / Tasker. Send commands to your AI agent from any device on your LAN. Agent executes locally (lights, heating, cameras). Zero cloud dependency.
 
 ```bash
-# iOS Shortcut: "Hey Siri, ask Hermes to dim the lights"
+# iOS Shortcut: "Hey Siri, ask Ariadne to dim the lights"
 HTTP POST → http://192.168.0.2:8080/command
-{"cmd":"hermes","args":"set living room lights to 30%"}
+{"cmd":"ariadne","args":"set living room lights to 30%"}
 
 # Tasker (Android): Auto-trigger on arrival home
 curl -X POST http://192.168.0.2:8080/command \
-  -d '{"cmd":"hermes","args":"activate home mode"}'
+  -d '{"cmd":"ariadne","args":"activate home mode"}'
 ```
 
 **Impact:** Private smart home control. No cloud logs. No voice recordings stored remotely.
@@ -265,7 +265,7 @@ cm.encrypt_outbound(open("auth_middleware.py").read())
 
 ---
 
-## Why These Applications Need hermes-crypto Specifically
+## Why These Applications Need mazemaker-gateway Specifically
 
 ### Not just encryption — the full stack:
 
@@ -278,7 +278,7 @@ cm.encrypt_outbound(open("auth_middleware.py").read())
 | **"What if someone analyzes my traffic?"** | Chaff injection (decoy queries) |
 | **"What if the key is compromised?"** | Auto-rotation every 20 messages |
 | **"What if the server crashes?"** | Key destroyed = data shredded |
-| **"How do I integrate with Hermes?"** | Plugin system (crypto_plugin.py) |
+| **"How do I integrate with Ariadne?"** | `cmd:ariadne` + `container/configure-ariadne.py` |
 
 ### The key insight:
 
@@ -301,7 +301,7 @@ This is not cryptographic perfection. It's operational security through obscurit
                             ┌──────┴──────┐
                             │             │
                      ┌──────▼──────┐ ┌────▼──────────┐
-                     │ Jackrabbit  │ │ Hermes Agent  │
+                     │ Jackrabbit  │ │ Ariadne Agent │
                      │ DLM :37373  │ │               │
                      │             │ │ ┌───────────┐ │
                      │ Key Vault   │ │ │AES256-GCM │ │
@@ -320,5 +320,5 @@ This is not cryptographic perfection. It's operational security through obscurit
 
 ---
 
-*Generated from source analysis of hermes-crypto (11 files, ~85KB).*
+*Generated from source analysis of mazemaker-gateway (11 files, ~85KB).*
 *All components: Python 3.8+, stdlib + pycryptodome only.*

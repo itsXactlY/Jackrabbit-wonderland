@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Hermes Remember Protocol
+Mazemaker Remember Protocol
 =========================
-Zero-knowledge base64 transport for Hermes Agent.
+Zero-knowledge base64 transport for the agent wire.
 
 LLMs can't do AES256. But they CAN decode base64.
 The `remember::` prefix makes it look like a memory recall protocol.
@@ -39,7 +39,7 @@ from typing import Optional
 
 class RememberProtocol:
     """
-    Base64 transport + AES256 storage for Hermes Agent.
+    Base64 transport + AES256 storage for the agent wire.
     
     Transport layer: base64 with `remember::` prefix
     Storage layer: AES256-GCM (pycryptodome)
@@ -283,7 +283,7 @@ This is a memory protocol. The encoding is a transport artifact."""
         """Store the master key in JackrabbitDLM volatile vault."""
         try:
             dlm_client.Put(
-                ID="hermes-remember",
+                ID="mazemaker-remember",
                 FileName=f"key-{session_id}",
                 Action="Put",
                 Expire=ttl,

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Sync Hermes Agent's local provider config from container/wonderland.env."""
+"""Point Ariadne's model at the local Wonderland gateway, from container/wonderland.env.
+
+Ariadne reads one `model:` block in <ARIADNE_HOME>/config.yaml: base_url (must end in /v1),
+name, api_key. This rewrites those three keys in place and leaves every other line alone.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV = ROOT / "container" / "wonderland.env"
-DEFAULT_CONFIG = Path(os.environ.get("HERMES_CONFIG", Path.home() / ".hermes" / "config.yaml"))
+DEFAULT_CONFIG = Path(os.environ.get("ARIADNE_HOME", Path.home() / "ariadne")).expanduser() / "config.yaml"
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -36,17 +40,6 @@ def yaml_scalar(value: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_./:@+-]+", value):
         return value
     return "'" + value.replace("'", "''") + "'"
-
-
-def unquote(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
-
-
-def normalized_name(value: str) -> str:
-    return value.strip().lower().replace(" ", "-")
 
 
 def find_top_block(lines: list[str], key: str, *, allow_dash: bool) -> tuple[int, int] | None:
@@ -100,11 +93,11 @@ def update_mapping_block(
     return lines, end
 
 
-def ensure_model_block(lines: list[str], provider: str, model: str, base_url: str) -> list[str]:
+def ensure_model_block(lines: list[str], model: str, base_url: str, api_key: str) -> list[str]:
     fields = {
-        "provider": provider,
-        "default": model,
         "base_url": base_url,
+        "name": model,
+        "api_key": api_key,
     }
     block = find_top_block(lines, "model", allow_dash=False)
     if block is None:
@@ -117,55 +110,6 @@ def ensure_model_block(lines: list[str], provider: str, model: str, base_url: st
 
     start, end = block
     lines, _ = update_mapping_block(lines, start, end, fields, indent="  ")
-    return lines
-
-
-def ensure_custom_provider(
-    lines: list[str],
-    provider: str,
-    model: str,
-    base_url: str,
-    api_key: str,
-) -> list[str]:
-    fields = {
-        "base_url": base_url,
-        "model": model,
-        "api_key": api_key,
-        "api_mode": "chat_completions",
-    }
-    entry = [f"- name: {yaml_scalar(provider)}\n"]
-    entry.extend(f"  {key}: {yaml_scalar(value)}\n" for key, value in fields.items())
-
-    block = find_top_block(lines, "custom_providers", allow_dash=True)
-    if block is None:
-        if lines and lines[-1].strip():
-            lines.append("\n")
-        lines.append("custom_providers:\n")
-        lines.extend(entry)
-        return lines
-
-    start, end = block
-    target = normalized_name(provider)
-    entry_start: int | None = None
-    name_re = re.compile(r"^-\s+name:\s*(.*?)\s*(?:#.*)?$")
-    for i in range(start + 1, end):
-        match = name_re.match(lines[i].rstrip("\n"))
-        if match and normalized_name(unquote(match.group(1))) == target:
-            entry_start = i
-            break
-
-    if entry_start is None:
-        lines[end:end] = entry
-        return lines
-
-    entry_end = end
-    for i in range(entry_start + 1, end):
-        if lines[i].startswith("-"):
-            entry_end = i
-            break
-
-    lines[entry_start] = f"- name: {yaml_scalar(provider)}\n"
-    lines, _ = update_mapping_block(lines, entry_start, entry_end, fields, indent="  ")
     return lines
 
 
@@ -186,8 +130,9 @@ def sync_config(config_path: Path, env_path: Path, *, dry_run: bool) -> tuple[Pa
     else:
         lines = []
 
-    lines = ensure_model_block(lines, provider, model, base_url)
-    lines = ensure_custom_provider(lines, provider, model, base_url, api_key)
+    if not base_url.rstrip("/").endswith("/v1"):
+        raise SystemExit(f"{env_path}: Ariadne needs a base_url ending in /v1, got {base_url}")
+    lines = ensure_model_block(lines, model, base_url.rstrip("/"), api_key)
     new_text = "".join(lines)
     if new_text and not new_text.endswith("\n"):
         new_text += "\n"
@@ -211,7 +156,7 @@ def sync_config(config_path: Path, env_path: Path, *, dry_run: bool) -> tuple[Pa
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Configure Hermes Agent to use the local Wonderland gateway."
+        description="Configure Ariadne to use the local Wonderland gateway."
     )
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -220,7 +165,7 @@ def main() -> None:
 
     backup, resolved = sync_config(args.config.expanduser(), args.env_file.expanduser(), dry_run=args.dry_run)
     mode = "would sync" if args.dry_run else "synced"
-    print(f"Hermes config {mode}: {args.config.expanduser()}")
+    print(f"Ariadne config {mode}: {args.config.expanduser()}")
     if backup:
         print(f"Backup: {backup}")
     print(f"Provider: {resolved['provider']}")

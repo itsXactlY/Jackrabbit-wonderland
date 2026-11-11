@@ -5,7 +5,7 @@ ARG JACKRABBITDLM_REF=
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HERMES_CRYPTO_HOME=/opt/hermes-crypto \
+    MAZEMAKER_GATEWAY_HOME=/opt/mazemaker-gateway \
     JACKRABBITDLM_HOME=/home/JackrabbitDLM \
     GATEWAY_PORT=8080 \
     RAW_TCP_PORT=37374 \
@@ -28,15 +28,15 @@ RUN python -m pip install --no-cache-dir pycryptodome psutil \
         git checkout FETCH_HEAD; \
     fi
 
-WORKDIR /opt/hermes-crypto
-COPY crypto_middleware.py remember_protocol.py dlm_vault.py crypto_plugin.py lan_gateway.py ./
+WORKDIR /opt/mazemaker-gateway
+COPY crypto_middleware.py remember_protocol.py dlm_vault.py lan_gateway.py ./
 COPY tests ./tests
-COPY container/entrypoint.sh /usr/local/bin/hermes-crypto
+COPY container/entrypoint.sh /usr/local/bin/mazemaker-gateway
 
-RUN chmod +x /usr/local/bin/hermes-crypto \
+RUN chmod +x /usr/local/bin/mazemaker-gateway \
     && mkdir -p "$JACKRABBITDLM_HOME/Logs" "$JACKRABBITDLM_HOME/Disk" "$JACKRABBITDLM_HOME/Quarantine"
 
 EXPOSE 8080 37373 37374
 
-ENTRYPOINT ["/usr/local/bin/hermes-crypto"]
+ENTRYPOINT ["/usr/local/bin/mazemaker-gateway"]
 CMD ["gateway"]

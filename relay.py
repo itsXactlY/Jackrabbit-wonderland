@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""relay.py — self-hosted circuit-relay for the hermes-crypto gateway.
+"""relay.py — self-hosted circuit-relay for the mazemaker-gateway gateway.
 
 Route C of the pairing story: lets a phone reach the user's own pod from
 OUTSIDE its LAN, without the pod needing any inbound port, and WITHOUT a
@@ -9,7 +9,7 @@ Topology
 --------
     phone  --HTTPS POST-->  relay (this, on a reachable host)  <--WSS out-- gateway (pod)
 
-  * The gateway (hermes-crypto lan_gateway) dials OUT to the relay over a
+  * The gateway (mazemaker-gateway lan_gateway) dials OUT to the relay over a
     persistent WebSocket and registers under its fingerprint `fp`
     (= sha256 of its TLS cert SubjectPublicKeyInfo — the SAME id the QR
     pairing code already carries). No inbound port on the pod.
@@ -219,7 +219,7 @@ def build_app() -> web.Application:
 def main() -> None:
     bind = os.environ.get("MM_RELAY_BIND", "0.0.0.0:9443")
     host, port = bind.rsplit(":", 1)
-    print(f"[relay] hermes-crypto circuit-relay on {host}:{port}", flush=True)
+    print(f"[relay] mazemaker-gateway circuit-relay on {host}:{port}", flush=True)
     web.run_app(build_app(), host=host, port=int(port), print=None)
 
 

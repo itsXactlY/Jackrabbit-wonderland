@@ -4,7 +4,7 @@ Documentation=https://github.com/rapmd73/JackrabbitDLM
 After=network-online.target
 Wants=network-online.target
 
-# StartLimit* belong in [Unit] — see the note in hermes-gateway@.service. This
+# StartLimit* belong in [Unit] — see the note in mazemaker-gateway@.service. This
 # unit is the one that actually demonstrated the cost: ReadWritePaths names
 # /home/JackrabbitDLM/{Logs,Disk,Quarantine}, and a MISSING one makes systemd
 # fail mount-namespace setup before Python ever runs. With Restart=always and

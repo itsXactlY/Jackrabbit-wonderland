@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Provision the LAN-hardening secrets the gateway needs to serve mobile clients
-# securely: a bearer token (gates shell/hermes/pulse) and a self-signed TLS cert
+# securely: a bearer token (gates shell/ariadne/pulse) and a self-signed TLS cert
 # (the app pins it). Idempotent — existing files are kept unless --force.
 #
 # Usage:
@@ -10,7 +10,7 @@
 # Prints the token and the cert SHA-256 fingerprint to paste/pin in the app.
 set -euo pipefail
 
-HOME_DIR="${HERMES_CRYPTO_HOME:-$HOME/.hermes-crypto}"
+HOME_DIR="${MAZEMAKER_GATEWAY_HOME:-$HOME/.mazemaker-gateway}"
 FORCE=0
 IPS=()
 for a in "$@"; do

@@ -1,6 +1,6 @@
-# Hermes-Crypto Documentation
+# mazemaker-gateway documentation
 
-> Zero-knowledge AES256-GCM encryption layer for [Hermes Agent](https://github.com/NousResearch/hermes-agent).
+> Zero-knowledge AES256-GCM encryption layer for the Mazemaker stack and its agent, [Ariadne](https://github.com/itsXactlY/ariadne).
 
 ## Table of Contents
 
@@ -10,7 +10,7 @@
 - [Deployment](deployment.md) — Podman, systemd services, firewall
 - [Configuration](configuration.md) — All config options and environment variables
 - [Security Model](security.md) — Threat model, attack surface, limitations
-- [Integration](integration.md) — Hermes plugin, PULSE, Neural Memory, external systems
+- [Integration](integration.md) — Ariadne, PULSE, Neural Memory, external systems
 - [Gateway](gateway.md) — HTTP/TCP API, Web UI, device access
 - [Troubleshooting](troubleshooting.md) — Common issues and solutions
 
@@ -20,7 +20,7 @@
 
 ```bash
 git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
-cd hermes-crypto
+cd mazemaker-gateway
 container/run-podman.sh build
 container/run-podman.sh start
 
@@ -34,12 +34,12 @@ set +a
 
 ```bash
 git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
-cd hermes-crypto
+cd mazemaker-gateway
 sudo bash install.sh
 
 # Verify
 systemctl status jackrabbit-dlm@$USER
-systemctl status hermes-gateway@$USER
+systemctl status mazemaker-gateway@$USER
 
 # Test from browser
 http://192.168.0.2:8080
@@ -49,7 +49,7 @@ http://192.168.0.2:8080
 
 LLM providers log everything. Your ਖੋਜ, your trades, your medical questions — all visible to provider employees, auditors, and data-mining pipelines.
 
-hermes-crypto encrypts every query before it leaves your machine. Provider sees base64 blobs. Nobody reviews millions of base64 logs.
+mazemaker-gateway encrypts every query before it leaves your machine. Provider sees base64 blobs. Nobody reviews millions of base64 logs.
 
 ```
 You: "¿Cuántos idiomas se hablan en Camerún?"

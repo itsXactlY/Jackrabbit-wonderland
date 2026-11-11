@@ -24,11 +24,11 @@ journalctl -u jackrabbit-dlm@$USER -n 50
 ## Gateway Not Starting
 
 ### Symptom
-`systemctl status hermes-gateway@$USER` shows `failed`.
+`systemctl status mazemaker-gateway@$USER` shows `failed`.
 
 ### Check
 ```bash
-journalctl -u hermes-gateway@$USER -n 50
+journalctl -u mazemaker-gateway@$USER -n 50
 ```
 
 ### Common Causes
@@ -37,7 +37,7 @@ journalctl -u hermes-gateway@$USER -n 50
 |-------|-----|
 | DLM not running | Start jackrabbit-dlm first |
 | Port 8080 in use | `ss -tlnp | grep 8080` — kill conflicting process |
-| Missing modules | `cd /opt/hermes-crypto && python3 -c "from remember_protocol import RememberProtocol"` |
+| Missing modules | `cd /opt/mazemaker-gateway && python3 -c "from remember_protocol import RememberProtocol"` |
 | pycryptodome not installed | `pip install pycryptodome` |
 
 ---
@@ -178,7 +178,7 @@ Gateway responses are slow.
 systemctl status jackrabbit-dlm@$USER | grep Memory
 
 # Gateway memory
-systemctl status hermes-gateway@$USER | grep Memory
+systemctl status mazemaker-gateway@$USER | grep Memory
 
 # Active connections
 ss -tnp | grep -E "8080|37373|37374" | wc -l
@@ -200,23 +200,23 @@ ss -tnp | grep -E "8080|37373|37374" | wc -l
 
 ```bash
 # Stop services
-sudo systemctl stop hermes-gateway@$USER
+sudo systemctl stop mazemaker-gateway@$USER
 sudo systemctl stop jackrabbit-dlm@$USER
 
 # Disable
-sudo systemctl disable hermes-gateway@$USER
+sudo systemctl disable mazemaker-gateway@$USER
 sudo systemctl disable jackrabbit-dlm@$USER
 
 # Remove service files
-sudo rm /etc/systemd/system/hermes-gateway@.service
+sudo rm /etc/systemd/system/mazemaker-gateway@.service
 sudo rm /etc/systemd/system/jackrabbit-dlm@.service
 sudo systemctl daemon-reload
 
 # Remove files
-sudo rm -rf /opt/hermes-crypto
+sudo rm -rf /opt/mazemaker-gateway
 
 # Remove firewall rules
-sudo nano /etc/nftables.conf  # Delete hermes-crypto rules
+sudo nano /etc/nftables.conf  # Delete mazemaker-gateway rules
 sudo nft -f /etc/nftables.conf
 
 # JackrabbitDLM preserved (shared resource)

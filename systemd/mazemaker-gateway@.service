@@ -1,6 +1,6 @@
 [Unit]
-Description=Hermes Zero-Knowledge LAN Gateway
-Documentation=https://github.com/itsXactlY/hermes-crypto
+Description=Mazemaker Zero-Knowledge LAN Gateway
+Documentation=https://github.com/itsXactlY/Jackrabbit-wonderland
 After=network-online.target jackrabbit-dlm@%i.service
 Wants=network-online.target
 
@@ -17,15 +17,15 @@ StartLimitBurst=5
 Type=simple
 User=%i
 Group=%i
-WorkingDirectory=/opt/hermes-crypto
-ExecStart=/usr/bin/python3 /opt/hermes-crypto/lan_gateway.py --port 8080 --tcp-port 37374
+WorkingDirectory=/opt/mazemaker-gateway
+ExecStart=/usr/bin/python3 /opt/mazemaker-gateway/lan_gateway.py --port 8080 --tcp-port 37374
 Restart=always
 RestartSec=10
 
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/opt/hermes-crypto
+ReadWritePaths=/opt/mazemaker-gateway
 PrivateTmp=yes
 
 # Resource limits
@@ -35,7 +35,7 @@ TasksMax=32
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=hermes-gateway
+SyslogIdentifier=mazemaker-gateway
 
 [Install]
 WantedBy=multi-user.target

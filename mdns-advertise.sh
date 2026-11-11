@@ -18,7 +18,7 @@
 # missing avahi are configuration errors and still exit 1, loudly.
 set -uo pipefail
 
-HOME_DIR="${HERMES_CRYPTO_HOME:-$HOME/.hermes-crypto}"
+HOME_DIR="${MAZEMAKER_GATEWAY_HOME:-$HOME/.mazemaker-gateway}"
 CRT="${GATEWAY_TLS_CERT:-$HOME_DIR/gateway.crt}"
 PORT="${MM_GATEWAY_PORT:-8443}"
 SVC_NAME="${MM_GATEWAY_MDNS_NAME:-Mazemaker Gateway}"

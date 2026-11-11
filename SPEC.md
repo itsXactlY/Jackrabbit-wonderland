@@ -1,9 +1,9 @@
-# Hermes Crypto Layer — SPEC.md
+# Mazemaker Gateway — SPEC.md
 
 ## Overview
 
-**Project:** hermes-crypto — Zero-knowledge AES256-GCM encryption layer for Hermes Agent
-**Repository:** `/home/alca/projects/hermes-crypto/`
+**Project:** mazemaker-gateway — Zero-knowledge AES256-GCM encryption layer for the Mazemaker stack
+**Repository:** `/home/alca/projects/mazemaker-stack/gateway/`
 **Created:** 2026-04-24
 
 ---
@@ -23,7 +23,7 @@
                │ Remember  │ │  DLM Vault│ │  Crypto   │
                │ Protocol  │ │           │ │  Plugin   │
                │           │ │           │ │           │
-               │Transport: │ │Key Storage│ │Hermes     │
+               │Transport: │ │Key Storage│ │Ariadne    │
                │ Base64    │ │Session    │ │Integration│
                │           │ │Locking    │ │           │
                │Storage:   │ │Msg Storage│ │           │
@@ -43,7 +43,6 @@
 | `crypto_middleware.py` | AES256-GCM encryption core | 283 |
 | `remember_protocol.py` | Base64 transport + AES256 storage | 408 |
 | `dlm_vault.py` | DLM bridge for volatile key storage | 340 |
-| `crypto_plugin.py` | Hermes-agent plugin | 241 |
 | `lan_gateway.py` | HTTP/TCP LAN control interface | 620 |
 
 ---
@@ -83,7 +82,7 @@ def decrypt(self, ciphertext_b64: str, key: Optional[str] = None) -> str:
     """
 ```
 
-#### 2. `crypto_plugin.py` — No server-side search decryption
+#### 2. `crypto_plugin.py` (removed 2026-11-11 with the Hermes integration) — No server-side search decryption
 
 Tool results are encrypted before entering context. The `on_tool_result` hook encrypts output but does NOT decrypt input. Search decryption is purely client-side.
 
@@ -151,7 +150,7 @@ hermes-upstream already implements client-side search via FTS5 in `hermes_state.
 - Summaries generated via auxiliary LLM
 - No encryption at rest (sessions stored in SQLite)
 
-**Why not chosen:** This is what hermes-upstream does for its own session search. hermes-crypto's value is in hiding LLM provider queries, not in providing search functionality.
+**Why not chosen:** This is what hermes-upstream does for its own session search. mazemaker-gateway's value is in hiding LLM provider queries, not in providing search functionality.
 
 ### Option C: Searchable Encryption
 
@@ -180,7 +179,7 @@ Would require implementing something like:
 ### Configuration
 
 ```yaml
-# hermes-crypto config (config.yaml or environment)
+# mazemaker-gateway config (config.yaml or environment)
 crypto:
   enabled: true
   search_decryption: client_only  # default, cannot be changed

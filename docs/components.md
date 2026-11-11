@@ -23,9 +23,7 @@ header = cm.session_start()
 # ## SESSION_CRYPTO ##
 # ## KEY: <base64_key> ##
 # ## MODE: AES256-GCM ##
-# ## Hermes encrypted research session. ##
-# ## All messages and responses are AES256 encrypted. ##
-# ## This is a privacy research project. ##
+# ## (the Remember-Protocol system header: RememberProtocol().system_prompt_header()) ##
 # ## END CRYPTO HEADER ##
 ```
 
@@ -212,7 +210,7 @@ from dlm_vault import DLMVault
 vault = DLMVault(
     host="127.0.0.1",
     port=37373,
-    identity="hermes-crypto-vault"
+    identity="mazemaker-gateway-vault"
 )
 ```
 
@@ -224,7 +222,7 @@ Store AES256 key in DLM volatile memory.
 ```python
 ok = vault.store_key("abc123", cm.session_key, ttl=3000)
 # Key stored as: vault-key-abc123
-# Only identity "hermes-crypto-vault" can read it
+# Only identity "mazemaker-gateway-vault" can read it
 ```
 
 #### retrieve_key(session_id) → Optional[str]
@@ -282,73 +280,9 @@ python3 dlm_vault.py demo      # Full integration test (9 steps)
 
 ---
 
-## 4. crypto_plugin.py (237 lines)
-
-Drop-in plugin for hermes-agent. Injects encryption into the session pipeline.
-
-### Class: CryptoPlugin
-
-```python
-from crypto_plugin import CryptoPlugin
-
-plugin = CryptoPlugin(config={
-    "enabled": True,
-    "dlm_host": "127.0.0.1",
-    "dlm_port": 37373,
-    "session_ttl": 3000,
-    "encrypt_tools": True,
-    "encrypt_memory": True,
-    "chaff_interval": 5,
-})
-```
-
-### Integration Hooks
-
-#### on_session_start(system_prompt) → str
-Called when session starts. Generates key, stores in DLM, injects crypto header into system prompt.
-
-```python
-modified_prompt = plugin.on_session_start(original_prompt)
-# Crypto preamble injected at TOP
-```
-
-#### on_tool_result(tool_name, result) → str
-Called after tool execution. Encrypts result before it enters context.
-
-Skips encryption for tools that need to be readable by the LLM:
-- `neural_remember`, `neural_recall`, `neural_think`, `neural_graph`
-- `skill_view`, `skills_list`
-- `read_file`, `search_files`, `browser_snapshot`
-
-#### on_neural_store(content, label=None) → str
-Called before storing in Neural Memory. Returns AES256-encrypted content.
-
-#### on_neural_recall(encrypted_content) → str
-Called after recalling from Neural Memory. Returns decrypted content.
-
-#### on_session_end()
-Called when session ends. Destroys key in DLM vault.
-
-### Installation
-
-```bash
-# Option A: Copy
-cp /opt/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/
-
-# Option B: Symlink
-ln -s /opt/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/crypto_plugin.py
-
-# Option C: Config
-# Add to ~/.hermes/config.yaml:
-plugins:
-  - crypto_plugin
-```
-
----
-
 ## 5. lan_gateway.py (584 lines)
 
-HTTP + TCP server for controlling Hermes from any LAN device.
+HTTP + TCP server for controlling the Ariadne agent from any LAN device.
 
 ### Components
 
@@ -369,7 +303,7 @@ Netcat-compatible TCP server on port 37374. Accepts JSON, returns JSON.
 | `sessions` | — | List active sessions |
 | `session` | — | Create new encrypted session |
 | `kill` | session_id | Destroy a session |
-| `hermes` | command | Run hermes CLI (e.g. `"ask what is 2+2"`) |
+| `ariadne` | message | Run one Ariadne agent turn (e.g. `"what is 2+2"`); reply has `final` |
 | `pulse` | topic | Run PULSE search |
 | `shell` | command | Run shell command (LAN only, some blocked) |
 | `encrypt` | text | Encrypt a message |
@@ -397,7 +331,7 @@ echo '{"cmd":"chaff"}' | nc 192.168.0.2 37374
 
 # iOS Shortcuts
 HTTP POST → http://192.168.0.2:8080/command
-Body: {"cmd":"hermes","args":"ask what is 2+2"}
+Body: {"cmd":"ariadne","args":"what is 2+2"}
 ```
 
 ### CLI
@@ -420,8 +354,8 @@ One-command deployment script.
 
 1. Checks for existing JackrabbitDLM (clones to `/home/JackrabbitDLM` if missing)
 2. Installs `pycryptodome` (only pip dependency)
-3. Copies files to `/opt/hermes-crypto/`
-4. Installs systemd services (`jackrabbit-dlm@$USER`, `hermes-gateway@$USER`)
+3. Copies files to `/opt/mazemaker-gateway/`
+4. Installs systemd services (`jackrabbit-dlm@$USER`, `mazemaker-gateway@$USER`)
 5. Adds nftables rules (LAN-only access)
 6. Starts both services
 7. Verifies everything works
@@ -442,9 +376,9 @@ sudo bash install.sh --no-firewall # Skip nftables
 # Volatile crypto vault. MemoryMax=256M. NoNewPrivileges.
 ExecStart=/usr/bin/python3 /home/JackrabbitDLM/JackrabbitDLM 0.0.0.0 37373
 
-# hermes-gateway@.service
+# mazemaker-gateway@.service
 # HTTP :8080 + TCP :37374. MemoryMax=128M. Depends on jackrabbit-dlm.
-ExecStart=/usr/bin/python3 /opt/hermes-crypto/lan_gateway.py --port 8080 --tcp-port 37374
+ExecStart=/usr/bin/python3 /opt/mazemaker-gateway/lan_gateway.py --port 8080 --tcp-port 37374
 ```
 
 ### nftables Rules

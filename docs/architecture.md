@@ -13,7 +13,7 @@
                           ┌────────┴────────┐
                           │                 │
                    ┌──────▼──────┐   ┌──────▼──────┐
-                   │ Jackrabbit  │   │   Hermes    │
+                   │ Jackrabbit  │   │   Ariadne   │
                    │ DLM         │   │   Agent     │
                    │ :37373      │   │             │
                    │             │   │ ┌─────────┐ │
@@ -56,7 +56,7 @@
 │   Remember   │ │  DLM Vault  │ │   Crypto    │
 │   Protocol   │ │  dlm_vault  │ │   Plugin    │
 │              │ │             │ │             │
-│ Transport:   │ │ Key Storage │ │ Hermes      │
+│ Transport:   │ │ Key Storage │ │ Ariadne     │
 │ Base64       │ │ Session Lock│ │ Integration │
 │              │ │ Msg Storage │ │             │
 │ Storage:     │ │             │ │ Hooks:      │
@@ -186,4 +186,4 @@ Locker(filename, ..., Encoder=aes256_encrypt, Decoder=aes256_decrypt)
 | `lock-{session_id}` | Session lock (concurrency) | 300s |
 | `health-check` | DLM connectivity test | 10s |
 
-All lockers use identity `hermes-crypto-vault` — only this identity can read/write.
+All lockers use identity `mazemaker-gateway-vault` — only this identity can read/write.

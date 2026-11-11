@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """relay_client.py — gateway side of Route C (self-hosted circuit-relay).
 
-Opt-in via MM_RELAY_URL. When set, the hermes-crypto gateway keeps a
+Opt-in via MM_RELAY_URL. When set, the mazemaker-gateway gateway keeps a
 persistent OUTBOUND WebSocket to the relay (relay.py, on a reachable host)
 so a phone outside the LAN can reach this pod with NO inbound port here.
 
@@ -139,7 +139,7 @@ def start(relay_url: str, cert_pem: str, key_pem: str, local_port: int) -> threa
 if __name__ == "__main__":
     _run_forever(
         os.environ["MM_RELAY_URL"],
-        os.path.expanduser(os.environ.get("GATEWAY_TLS_CERT", "~/.hermes-crypto/gateway.crt")),
-        os.path.expanduser(os.environ.get("GATEWAY_TLS_KEY", "~/.hermes-crypto/gateway.key")),
+        os.path.expanduser(os.environ.get("GATEWAY_TLS_CERT", "~/.mazemaker-gateway/gateway.crt")),
+        os.path.expanduser(os.environ.get("GATEWAY_TLS_KEY", "~/.mazemaker-gateway/gateway.key")),
         int(os.environ.get("GATEWAY_PORT", "8443")),
     )

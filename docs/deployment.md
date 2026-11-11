@@ -30,7 +30,7 @@ gateway/DLM ports `8080`, `37373`, and `37374` to avoid colliding with native
 systemd deployments.
 
 ```bash
-cd /home/alca/projects/hermes-crypto
+cd /home/alca/projects/mazemaker-stack/gateway
 
 # Build the local image.
 container/run-podman.sh build
@@ -48,7 +48,7 @@ repo-owned file instead:
 
 ```bash
 set -a
-. /home/alca/projects/hermes-crypto/container/wonderland.env
+. /home/alca/projects/mazemaker-stack/gateway/container/wonderland.env
 set +a
 ```
 
@@ -61,16 +61,15 @@ That file is the source of truth for projects using `wonderland`:
 | `WONDERLAND_BASE_URL` | `http://127.0.0.1:18080/v1` |
 | `WONDERLAND_MODEL` | `wonderland` |
 
-To make the host Hermes CLI use that same gateway by default, sync its local
-provider config from the source-of-truth file:
+To make Ariadne use that same gateway by default, sync its model config from the
+source-of-truth file:
 
 ```bash
-container/run-podman.sh configure-hermes
+container/run-podman.sh configure-ariadne
 ```
 
-This creates or updates the named Hermes custom provider `wonderland`, sets the
-default model to `wonderland`, and keeps a timestamped backup of
-`~/.hermes/config.yaml`.
+This rewrites the `model:` block of `~/ariadne/config.yaml` (base_url, name `wonderland`,
+api_key) and keeps a timestamped backup of the file.
 
 If the gateway needs provider keys or a specific upstream provider model, copy
 `container/gateway.env.example` to `container/gateway.env`. That local file is
@@ -89,13 +88,13 @@ podman compose -f container/podman-compose.yml up -d --build
 ```
 
 The image includes only JackrabbitDLM and the Wonderland gateway/encryption
-proxy. It does not install `hermes-agent` inside the pod.
+proxy. It does not install an agent inside the pod.
 
 ### Automatic
 
 ```bash
-git clone https://github.com/itsXactlY/hermes-crypto.git
-cd hermes-crypto
+git clone https://github.com/itsXactlY/Jackrabbit-wonderland.git
+cd mazemaker-gateway
 sudo bash install.sh
 ```
 
@@ -103,8 +102,8 @@ The installer:
 
 1. **Checks for JackrabbitDLM** — clones to `/home/JackrabbitDLM` if missing
 2. **Installs pycryptodome** — `pip install pycryptodome`
-3. **Copies files** — to `/opt/hermes-crypto/`
-4. **Installs systemd services** — `jackrabbit-dlm@$USER`, `hermes-gateway@$USER`
+3. **Copies files** — to `/opt/mazemaker-gateway/`
+4. **Installs systemd services** — `jackrabbit-dlm@$USER`, `mazemaker-gateway@$USER`
 5. **Adds nftables rules** — LAN-only access (192.168.0.0/24)
 6. **Starts both services**
 7. **Verifies** — health check + test encrypt/decrypt
@@ -119,9 +118,9 @@ git clone https://github.com/rapmd73/JackrabbitDLM.git /home/JackrabbitDLM
 pip install pycryptodome
 
 # 3. Copy files
-sudo mkdir -p /opt/hermes-crypto
-sudo cp crypto_middleware.py dlm_vault.py crypto_plugin.py \
-        lan_gateway.py remember_protocol.py /opt/hermes-crypto/
+sudo mkdir -p /opt/mazemaker-gateway
+sudo cp crypto_middleware.py dlm_vault.py \
+        lan_gateway.py remember_protocol.py /opt/mazemaker-gateway/
 
 # 4. Install systemd services
 sudo cp systemd/*.service /etc/systemd/system/
@@ -134,7 +133,7 @@ sudo nft -f /etc/nftables.conf
 
 # 6. Start services
 sudo systemctl enable --now jackrabbit-dlm@$USER
-sudo systemctl enable --now hermes-gateway@$USER
+sudo systemctl enable --now mazemaker-gateway@$USER
 ```
 
 ## Service Management
@@ -142,18 +141,18 @@ sudo systemctl enable --now hermes-gateway@$USER
 ```bash
 # Status
 systemctl status jackrabbit-dlm@$USER
-systemctl status hermes-gateway@$USER
+systemctl status mazemaker-gateway@$USER
 
 # Logs
 journalctl -u jackrabbit-dlm@$USER -f
-journalctl -u hermes-gateway@$USER -f
+journalctl -u mazemaker-gateway@$USER -f
 
 # Restart
 sudo systemctl restart jackrabbit-dlm@$USER
-sudo systemctl restart hermes-gateway@$USER
+sudo systemctl restart mazemaker-gateway@$USER
 
 # Stop
-sudo systemctl stop hermes-gateway@$USER
+sudo systemctl stop mazemaker-gateway@$USER
 sudo systemctl stop jackrabbit-dlm@$USER
 ```
 
@@ -177,7 +176,7 @@ MemoryMax=256M
 TasksMax=64
 ```
 
-### hermes-gateway@.service
+### mazemaker-gateway@.service
 
 ```ini
 [Unit]
@@ -186,13 +185,13 @@ After=network-online.target jackrabbit-dlm@%i.service
 [Service]
 Type=simple
 User=%i
-WorkingDirectory=/opt/hermes-crypto
-ExecStart=/usr/bin/python3 /opt/hermes-crypto/lan_gateway.py --port 8080 --tcp-port 37374
+WorkingDirectory=/opt/mazemaker-gateway
+ExecStart=/usr/bin/python3 /opt/mazemaker-gateway/lan_gateway.py --port 8080 --tcp-port 37374
 Restart=always
 RestartSec=10
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/opt/hermes-crypto
+ReadWritePaths=/opt/mazemaker-gateway
 PrivateTmp=yes
 MemoryMax=128M
 TasksMax=32
@@ -205,7 +204,7 @@ TasksMax=32
 ```nft
 # /etc/nftables.conf — add these rules
 
-# Hermes Crypto Gateway - LAN only
+# Mazemaker Gateway - LAN only
 ip saddr 192.168.0.0/24 tcp dport { 8080, 37373, 37374 } accept
 ```
 
@@ -227,7 +226,7 @@ sudo bash install.sh --uninstall
 
 Removes:
 - Systemd services
-- `/opt/hermes-crypto/` directory
+- `/opt/mazemaker-gateway/` directory
 - nftables rules
 
 Preserves:
@@ -238,7 +237,7 @@ Preserves:
 ```bash
 # 1. Services running
 systemctl is-active jackrabbit-dlm@$USER   # → active
-systemctl is-active hermes-gateway@$USER    # → active
+systemctl is-active mazemaker-gateway@$USER    # → active
 
 # 2. DLM reachable
 curl -s http://localhost:8080/status | python3 -m json.tool
@@ -247,7 +246,7 @@ curl -s http://localhost:8080/status | python3 -m json.tool
 curl -s http://localhost:8080/ | head -5
 
 # 4. Full test
-cd ~/projects/hermes-crypto
+cd ~/projects/mazemaker-stack/gateway
 python3 dlm_vault.py demo
 ```
 

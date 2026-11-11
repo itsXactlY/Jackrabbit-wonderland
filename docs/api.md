@@ -111,14 +111,14 @@ CryptoMiddleware = RememberProtocol  # Line 316
 ### Constructor
 
 ```python
-DLMVault(host: str = "127.0.0.1", port: int = 37373, identity: str = "hermes-crypto-vault")
+DLMVault(host: str = "127.0.0.1", port: int = 37373, identity: str = "mazemaker-gateway-vault")
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `host` | `str` | `"127.0.0.1"` | DLM server host |
 | `port` | `int` | `37373` | DLM server port |
-| `identity` | `str` | `"hermes-crypto-vault"` | DLM identity (ownership) |
+| `identity` | `str` | `"mazemaker-gateway-vault"` | DLM identity (ownership) |
 
 ### Methods
 
@@ -144,46 +144,6 @@ end_encrypted_session(session: dict) → bool
 
 ---
 
-## crypto_plugin.CryptoPlugin
-
-### Constructor
-
-```python
-CryptoPlugin(config: dict = None)
-```
-
-| Config Key | Type | Default | Description |
-|------------|------|---------|-------------|
-| `enabled` | `bool` | `True` | Enable/disable plugin |
-| `dlm_host` | `str` | `"127.0.0.1"` | DLM server host |
-| `dlm_port` | `int` | `37373` | DLM server port |
-| `session_ttl` | `int` | `3000` | Key TTL in seconds |
-| `encrypt_tools` | `bool` | `True` | Encrypt tool results |
-| `encrypt_memory` | `bool` | `True` | Encrypt Neural Memory |
-| `chaff_interval` | `int` | `5` | Chaff every N messages |
-
-### Methods
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `on_session_start` | `(system_prompt) → str` | Modified prompt | Inject crypto header |
-| `on_tool_result` | `(tool_name, result) → str` | Encrypted result | Encrypt tool output |
-| `on_neural_store` | `(content, label=None) → str` | Encrypted | Encrypt for memory storage |
-| `on_neural_recall` | `(encrypted_content) → str` | Decrypted | Decrypt from memory |
-| `on_session_end` | `() → None` | — | Destroy key, cleanup |
-| `get_status` | `() → dict` | Status | Plugin state |
-
-### Factory Function
-
-```python
-create_plugin_instance(config=None) → CryptoPlugin
-```
-
-### Standalone Injection
-
-```python
-inject_into_system_prompt(system_prompt, config=None) → str
-```
 
 ---
 

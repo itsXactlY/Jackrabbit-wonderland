@@ -1,33 +1,15 @@
 # Integration Guide
 
-## Hermes Agent Plugin
+## Ariadne
 
-### Option A: Copy Plugin
-
-```bash
-cp ~/projects/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/
-```
-
-### Option B: Symlink
+Point Ariadne's model at Wonderland, so every provider call is Remember-Protocol encoded:
 
 ```bash
-ln -s ~/projects/hermes-crypto/crypto_plugin.py ~/.hermes/plugins/crypto_plugin.py
+container/run-podman.sh configure-ariadne   # rewrites model: in ~/ariadne/config.yaml
 ```
 
-### How It Works
-
-1. On session start: `on_session_start()` generates key, stores in DLM, injects header
-2. Before each tool result: `on_tool_result()` encrypts (except whitelisted tools)
-3. Before Neural Memory store: `on_neural_store()` encrypts content
-4. After Neural Memory recall: `on_neural_recall()` decrypts content
-5. On session end: `on_session_end()` destroys key
-
-### Whitelisted Tools (not encrypted)
-
-These tools must remain readable by the LLM:
-- `neural_remember`, `neural_recall`, `neural_think`, `neural_graph`
-- `skill_view`, `skills_list`
-- `read_file`, `search_files`, `browser_snapshot`
+LAN clients run an agent turn through the gateway with `cmd:ariadne`
+(`ariadne-agent --home $ARIADNE_HOME -- <message>`; set `ARIADNE_BIN` if it is not on PATH).
 
 ---
 
@@ -70,21 +52,11 @@ stored = "AES:base64(nonce+tag+ciphertext)"
 plaintext = rp.recall_encrypted(stored)
 ```
 
-### Via Plugin
-
-```python
-plugin = CryptoPlugin()
-
-# Automatic — plugin hooks handle encryption
-encrypted = plugin.on_neural_store(content)
-decrypted = plugin.on_neural_recall(encrypted)
-```
-
 ---
 
 ## iOS Shortcuts
 
-### Quick Hermes Query
+### Quick Ariadne Query
 
 1. Open Shortcuts app
 2. Create new shortcut
@@ -92,30 +64,30 @@ decrypted = plugin.on_neural_recall(encrypted)
    - URL: `http://192.168.0.2:8080/command`
    - Method: POST
    - Headers: `Content-Type: application/json`
-   - Body: `{"cmd":"hermes","args":"ask what is 2+2"}`
+   - Body: `{"cmd":"ariadne","args":"what is 2+2"}`
 4. Add "Get Dictionary from Input"
-5. Add "Get Dictionary Value" → key: `stdout`
+5. Add "Get Dictionary Value" → key: `final`
 6. Add "Speak" or "Show Result"
 
 ### Voice Control
 
-"Hey Siri, ask Hermes [your question]"
+"Hey Siri, ask Ariadne [your question]"
 
 ---
 
 ## Tasker (Android)
 
 ```yaml
-Profile: Hermes Query
+Profile: Ariadne Query
   Event: AutoVoice Recognized
   Task:
     1. HTTP Post
        Server: http://192.168.0.2:8080/command
-       Data: {"cmd":"hermes","args":"%avmessage"}
+       Data: {"cmd":"ariadne","args":"%avmessage"}
     2. JavaScriptlet
        var result = JSON.parse(global('HTTPD'));
-       setGlobal('HERMES_RESULT', result.stdout);
-    3. Say %HERMES_RESULT
+       setGlobal('ARIADNE_RESULT', result.final);
+    3. Say %ARIADNE_RESULT
 ```
 
 ---
@@ -126,7 +98,7 @@ Profile: Hermes Query
 
 ```python
 import sys
-sys.path.insert(0, "~/projects/hermes-crypto")
+sys.path.insert(0, "~/projects/mazemaker-stack/gateway")
 from crypto_middleware import CryptoMiddleware
 
 cm = CryptoMiddleware()
@@ -178,12 +150,12 @@ recalled = rp.recall_encrypted(stored)
 
 ```yaml
 rest_command:
-  hermes_query:
+  ariadne_query:
     url: "http://192.168.0.2:8080/command"
     method: POST
     headers:
       Content-Type: "application/json"
-    payload: '{"cmd":"hermes","args":"{{ command }}"}'
+    payload: '{"cmd":"ariadne","args":"{{ command }}"}'
 ```
 
 ### Grafana / Monitoring
@@ -194,5 +166,5 @@ curl http://192.168.0.2:8080/status | jq '.dlm'
 
 # Systemd status
 systemctl is-active jackrabbit-dlm@$USER
-systemctl is-active hermes-gateway@$USER
+systemctl is-active mazemaker-gateway@$USER
 ```

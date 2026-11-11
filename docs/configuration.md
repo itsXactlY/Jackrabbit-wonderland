@@ -14,7 +14,7 @@
 | `DLM_TIMEOUT` | `2` | Socket timeout for each DLM attempt |
 | `SESSION_TTL` | `3000` | Gateway session key TTL, in seconds |
 | `JACKRABBITDLM_HOME` | `/home/JackrabbitDLM` | Location of `DLMLocker.py` and `JackrabbitDLM` |
-| `PROXY_MODEL_ALIASES` | `wonderland,hermes-agent,proxy,default` | Model names rewritten to the real Hermes runtime model |
+| `PROXY_MODEL_ALIASES` | `wonderland,ariadne,proxy,default` | Model names that mean "this gateway", rewritten to the configured upstream model |
 | `WONDERLAND_UPSTREAM_PROVIDER` | `openrouter` | Upstream OpenAI-compatible provider preset |
 | `WONDERLAND_UPSTREAM_BASE_URL` | provider default | Upstream OpenAI-compatible base URL |
 | `WONDERLAND_UPSTREAM_MODEL` | unset | Real upstream model used behind the `wonderland` alias |
@@ -27,7 +27,7 @@ instead of duplicating endpoint/model settings:
 
 ```bash
 set -a
-. /home/alca/projects/hermes-crypto/container/wonderland.env
+. /home/alca/projects/mazemaker-stack/gateway/container/wonderland.env
 set +a
 ```
 
@@ -42,16 +42,14 @@ It defines:
 | `WONDERLAND_BASE_URL` | `http://127.0.0.1:18080/v1` |
 | `WONDERLAND_MODEL` | `wonderland` |
 
-Hermes Agent does not use `OPENAI_BASE_URL` as the primary source when
-`~/.hermes/config.yaml` already has a saved model/provider. Sync Hermes from the
-same file instead:
+Ariadne reads its model from `~/ariadne/config.yaml` (`model.base_url`, `model.name`,
+`model.api_key`). Sync it from the same file:
 
 ```bash
-container/run-podman.sh configure-hermes
+container/run-podman.sh configure-ariadne
 ```
 
-After this, running `hermes` uses the named custom provider `wonderland`, model
-`wonderland`, and base URL `http://127.0.0.1:18080/v1`.
+After this, Ariadne runs on model `wonderland` at base URL `http://127.0.0.1:18080/v1`.
 
 ## Gateway Configuration
 
@@ -75,27 +73,13 @@ cm.chaff_interval = 3       # Chaff every 3 messages (default: 3)
 cm.rotation_interval = 20   # Rotate key every 20 messages (default: 20)
 ```
 
-## Plugin Configuration
-
-```python
-plugin = CryptoPlugin(config={
-    "enabled": True,          # Enable/disable
-    "dlm_host": "127.0.0.1", # DLM host
-    "dlm_port": 37373,       # DLM port
-    "session_ttl": 3000,     # Key TTL (DLM-safe default)
-    "encrypt_tools": True,    # Encrypt tool results
-    "encrypt_memory": True,   # Encrypt Neural Memory
-    "chaff_interval": 5,      # Chaff every 5 messages
-})
-```
-
 ## DLM Vault Configuration
 
 ```python
 vault = DLMVault(
     host="127.0.0.1",          # DLM server
     port=37373,                 # DLM port
-    identity="hermes-crypto-vault"  # Ownership identity
+    identity="mazemaker-gateway-vault"  # Ownership identity
 )
 ```
 

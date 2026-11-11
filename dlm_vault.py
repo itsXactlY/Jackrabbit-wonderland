@@ -41,7 +41,7 @@ class DLMVault:
     """Client for storing crypto keys in JackrabbitDLM via DLMLocker."""
     
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
-                 identity: str = "hermes-crypto-vault",
+                 identity: str = "mazemaker-gateway-vault",
                  retry: Optional[int] = None,
                  retry_sleep: Optional[float] = None,
                  timeout: Optional[float] = None):

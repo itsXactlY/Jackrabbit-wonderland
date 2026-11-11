@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**hermes-crypto** is a zero-knowledge AES256-GCM encryption layer that sits between [Hermes Agent](https://github.com/NousResearch/hermes-agent) and its AI provider. The provider sees base64 blobs and chaff noise — not plaintext queries. Keys live exclusively in volatile memory via JackrabbitDLM and are auto-destroyed on TTL expiry or crash.
+**mazemaker-gateway** is a zero-knowledge AES256-GCM encryption layer that sits between the agent ([Ariadne](https://github.com/itsXactlY/ariadne)) and its AI provider. The provider sees base64 blobs and chaff noise — not plaintext queries. Keys live exclusively in volatile memory via JackrabbitDLM and are auto-destroyed on TTL expiry or crash.
 
 The sole external Python dependency is `pycryptodome`. Everything else is stdlib.
 
@@ -52,7 +52,7 @@ python3 lan_gateway.py --no-crypto      # debug mode
 container/run-podman.sh build
 container/run-podman.sh start
 container/run-podman.sh status
-container/run-podman.sh configure-hermes   # sync host Hermes CLI to Wonderland
+container/run-podman.sh configure-ariadne   # point ~/ariadne/config.yaml at Wonderland
 
 # Native systemd
 sudo bash install.sh
@@ -62,8 +62,8 @@ sudo bash install.sh --no-firewall
 
 # Service management (native)
 systemctl status jackrabbit-dlm@$USER
-systemctl status hermes-gateway@$USER
-journalctl -u hermes-gateway@$USER -f
+systemctl status mazemaker-gateway@$USER
+journalctl -u mazemaker-gateway@$USER -f
 ```
 
 ### Environment Variables
@@ -78,7 +78,7 @@ Key env vars recognized across all components:
 | `GATEWAY_PORT` | `8080` | HTTP gateway port |
 | `RAW_TCP_PORT` | `37374` | Raw TCP (netcat) port |
 | `SESSION_TTL` | `3000` | Key TTL in seconds (max safe: 3543) |
-| `HERMES_BIN` | `hermes` | Path to Hermes CLI |
+| `ARIADNE_BIN` / `ARIADNE_HOME` | `ariadne-agent` / `~/ariadne` | Agent binary and home `cmd:ariadne` runs |
 | `WONDERLAND_UPSTREAM_PROVIDER` | `openrouter` | Upstream AI provider |
 | `WONDERLAND_UPSTREAM_BASE_URL` | — | Provider base URL |
 | `WONDERLAND_UPSTREAM_API_KEY` | — | Provider API key |
@@ -91,17 +91,15 @@ Key env vars recognized across all components:
 crypto_middleware.py   — AES256-GCM core: encrypt/decrypt, key rotation, chaff
 remember_protocol.py   — Base64 transport layer for LLM wire format (LLMs can't do AES256)
 dlm_vault.py           — Bridge to JackrabbitDLM: volatile key storage, session locking
-crypto_plugin.py       — Hermes-agent plugin: hooks into session start/end/tool results
 lan_gateway.py         — HTTP :8080 + raw TCP :37374 control interface, Web UI, proxy
 ```
 
 ### Data Flow
 
-1. `CryptoMiddleware.session_start()` generates a random AES256 key and returns a crypto header string injected into the Hermes system prompt (looks like "developer testing encryption").
+1. `CryptoMiddleware.session_start()` generates a random AES256 key and returns a crypto header string injected into the agent's system prompt (looks like "developer testing encryption").
 2. `DLMVault.store_key()` puts the key into JackrabbitDLM's volatile memory with a TTL. Key never touches disk.
 3. Outbound messages are AES256-GCM encrypted → base64 → sent to provider wrapped in `ENC_MSG: <blob>` format. Every 3–5 messages a chaff query fires. Every 20 messages the key rotates (old key kept in `_key_history` for decrypting prior messages, max history depth 5).
-4. `CryptoPlugin` wires the above into Hermes agent hooks: `on_session_start`, `on_tool_result`, `on_session_end`.
-5. `lan_gateway.py` exposes all of this to LAN devices: browser Web UI, JSON API (`POST /command`), and raw TCP for netcat/iOS Shortcuts.
+4. `lan_gateway.py` exposes all of this to LAN devices: browser Web UI, JSON API (`POST /command`), and raw TCP for netcat/iOS Shortcuts.
 
 ### Two Layers — Hard Separation
 
@@ -135,6 +133,6 @@ DLM locker names follow a consistent scheme:
 
 - **Zero-knowledge server**: The gateway and DLM vault never decrypt user queries. `CryptoMiddleware.decrypt()` is for client-side use only — this is enforced by design, not just convention.
 - **Volatile keys only**: Keys must never be written to disk. The DLM's in-memory TTL is the only storage. Crash = key destroyed = encrypted data cryptographically shredded.
-- **DLMLocker ownership**: Each DLM locker name must be unique per session. Reusing a locker name across sessions causes `NotOwner` errors. The `identity` parameter on `DLMVault` defaults to `"hermes-crypto-vault"` — all lockers under one vault instance share this identity.
+- **DLMLocker ownership**: Each DLM locker name must be unique per session. Reusing a locker name across sessions causes `NotOwner` errors. The `identity` parameter on `DLMVault` defaults to `"mazemaker-gateway-vault"` — all lockers under one vault instance share this identity.
 - **Printable-only DLM values**: JackrabbitDLM's `DataStore` field requires printable strings. Binary keys must be base64-encoded before storage.
 - **TTL cap**: Maximum anonymous DLM TTL is 3543 seconds. `SESSION_TTL` defaults to 3000 for safety margin.

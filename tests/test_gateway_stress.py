@@ -161,7 +161,7 @@ def test_remember_only_upstream_payload():
 
 
 def test_remember_idempotent_no_double_encode():
-    """If a hermes-side plugin already encoded the message, the gateway must
+    """If a client-side encoder already encoded the message, the gateway must
     NOT re-encode (would yield `remember::<b64-of-remember::..>` which LLMs
     cannot single-decode)."""
     try:
@@ -171,7 +171,7 @@ def test_remember_idempotent_no_double_encode():
         import lan_gateway
         from remember_protocol import RememberProtocol
 
-        original = "hello from hermes"
+        original = "hello from ariadne"
         pre_encoded = RememberProtocol().encode(original)  # remember::aGVsbG8...
 
         session = {"session_id": "test"}

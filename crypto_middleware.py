@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Hermes Zero-Knowledge Crypto Middleware
+Mazemaker Gateway Zero-Knowledge Crypto Middleware
 ========================================
-Injects AES256-GCM encryption into the Hermes agent session.
+Injects AES256-GCM encryption into the gateway's agent sessions.
 
 Threat model: Provider sees everything but doesn't notice/care.
 Protection: Obscurity + volume + local processing for sensitive work.
@@ -38,7 +38,7 @@ from typing import Optional, Tuple
 
 
 class CryptoMiddleware:
-    """AES256-GCM encryption layer for Hermes agent sessions."""
+    """AES256-GCM encryption layer for gateway agent sessions."""
     
     CHAFF_POOL = [
         "ما هو الطقس في القاهرة اليوم؟",                          # Arabic
@@ -108,7 +108,7 @@ class CryptoMiddleware:
         self.session_key = self._generate_key()
         self.message_count = 0
         dlm_client.Put(
-            ID="hermes-crypto",
+            ID="mazemaker-gateway",
             FileName=f"session-key-{session_id}",
             Action="Put",
             Expire=7200,

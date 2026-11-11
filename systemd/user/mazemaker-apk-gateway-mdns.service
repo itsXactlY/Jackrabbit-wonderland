@@ -1,6 +1,6 @@
 [Unit]
 Description=Mazemaker APK gateway mDNS advertisement (_mazemaker-gw._tcp)
-Documentation=https://github.com/itsXactlY/hermes-crypto
+Documentation=https://github.com/itsXactlY/Jackrabbit-wonderland
 After=mazemaker-apk-gateway.service avahi-daemon.service
 Wants=mazemaker-apk-gateway.service
 PartOf=mazemaker-apk-gateway.service
@@ -20,12 +20,12 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-Environment=HERMES_CRYPTO_HOME=%h/.hermes-crypto
+Environment=MAZEMAKER_GATEWAY_HOME=%h/.mazemaker-gateway
 # A foreground supervisor (Type=simple): it keeps avahi-publish-service
 # running, republishes when the LAN address changes, and deregisters on stop.
 # A missing avahi or cert exits 1 — install-apk-gateway.sh checks both and
 # fails loudly first.
-ExecStart=%h/projects/hermes-crypto/mdns-advertise.sh
+ExecStart=%h/projects/mazemaker-stack/gateway/mdns-advertise.sh
 Restart=always
 RestartSec=10
 

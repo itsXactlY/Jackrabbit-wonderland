@@ -19,7 +19,7 @@ import os
 import time
 import threading
 
-sys.path.insert(0, "/opt/hermes-crypto")
+sys.path.insert(0, "/opt/mazemaker-gateway")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dlm_vault import DLMVault
 from crypto_middleware import CryptoMiddleware
@@ -55,7 +55,7 @@ class TestResult:
 R = TestResult()
 
 
-def get_vault(identity: str = "hermes-crypto-vault"):
+def get_vault(identity: str = "mazemaker-gateway-vault"):
     host = os.environ.get("DLM_HOST", "127.0.0.1")
     port = int(os.environ.get("DLM_PORT", "37373"))
     return DLMVault(host=host, port=port, identity=identity)

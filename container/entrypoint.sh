@@ -19,7 +19,7 @@ case "$cmd" in
                 sleep 1
             done
         fi
-        exec python3 /opt/hermes-crypto/lan_gateway.py \
+        exec python3 /opt/mazemaker-gateway/lan_gateway.py \
             --bind "${GATEWAY_BIND:-0.0.0.0}" \
             --port "${GATEWAY_PORT:-8080}" \
             --tcp-port "${RAW_TCP_PORT:-37374}" \
@@ -36,7 +36,7 @@ case "$cmd" in
             "$@"
         ;;
     test|tests)
-        exec python3 /opt/hermes-crypto/tests/run_all.py "$@"
+        exec python3 /opt/mazemaker-gateway/tests/run_all.py "$@"
         ;;
     sh|shell)
         exec /bin/sh "$@"

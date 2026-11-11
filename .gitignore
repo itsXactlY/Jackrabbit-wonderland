@@ -8,3 +8,5 @@ venv/
 .DS_Store
 container/gateway.env
 .codex
+.skills_prompt_snapshot.json
+.update_check

@@ -9,7 +9,6 @@ Usage:
   python3 tests/run_all.py crypto    # Run specific suite
   python3 tests/run_all.py gateway   # Run gateway tests only
   python3 tests/run_all.py dlm       # Run DLM vault tests only
-  python3 tests/run_all.py plugin    # Run plugin tests only
 """
 
 import sys
@@ -24,7 +23,6 @@ SUITES = {
     "crypto": "test_crypto_middleware.py",
     "gateway": "test_gateway_stress.py",
     "dlm": "test_dlm_vault.py",
-    "plugin": "test_crypto_plugin.py",
 }
 
 
