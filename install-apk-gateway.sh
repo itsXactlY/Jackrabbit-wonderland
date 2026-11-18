@@ -116,7 +116,10 @@ step "Install the user units"
 run mkdir -p "$UD"
 for u in mazemaker-apk-gateway.service mazemaker-apk-gateway-mdns.service; do
   if [[ $DRY == 1 ]]; then say "[dry-run] install -m644 $REPO/systemd/user/$u $UD/"
-  else install -m644 "$REPO/systemd/user/$u" "$UD/$u"; ok "installed $u"; fi
+  # The units name the developer checkout; they run from THIS one, wherever it is
+  # (mazemaker's installer clones into ~/.mazemaker/gateway).
+  else sed "s|%h/projects/mazemaker-stack/gateway|$REPO|g" "$REPO/systemd/user/$u" > "$UD/$u"
+       chmod 644 "$UD/$u"; ok "installed $u"; fi
 done
 run systemctl --user daemon-reload
 
